@@ -52,8 +52,13 @@ tidy:
 # single static file with no runtime dependencies.
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
+# macOS ships `shasum`, Linux ships `sha256sum`. Both emit and verify the same
+# format, so checksums.txt is checkable with whichever the user happens to have.
+SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo 'sha256sum' || echo 'shasum -a 256')
+
 .PHONY: release
 release:
+	@rm -rf dist
 	@mkdir -p dist
 	@for platform in $(PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; \
@@ -61,6 +66,10 @@ release:
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 			go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-$$os-$$arch $(PKG) || exit 1; \
 	done
+	@# Hashed from inside dist/ so the file holds bare names, which is what
+	@# `sha256sum -c` needs when a user downloads next to the binary.
+	@cd dist && $(SHA256) $(BINARY)-* > checksums.txt
+	@echo "wrote dist/checksums.txt"
 
 .PHONY: clean
 clean:

@@ -60,18 +60,34 @@ func goDockerfile(d Detection) string {
 	}
 
 	return header() + fmt.Sprintf(`
-FROM golang:%s-alpine AS build
+# Pinned to the builder's own architecture. Without --platform, a build for a
+# target that differs from the machine (an arm64 laptop shipping to an amd64
+# server) runs this entire stage under QEMU emulation, which is several times
+# slower and flaky for some toolchains. Go cross-compiles natively, so the
+# compiler never needs to be emulated — only the runtime stage below is built
+# for the target platform.
+FROM --platform=$BUILDPLATFORM golang:%s-alpine AS build
 WORKDIR /src
 
-# Dependencies first: this layer is reused until go.mod/go.sum change.
+# Dependencies first: this layer is reused until go.mod/go.sum change. Module
+# downloads are architecture-independent, so this layer is also shared across
+# every target platform in a multi-platform build.
 COPY go.mod go.sum* ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
-# CGO off yields a static binary that runs on a distroless/scratch base.
+# BuildKit defines these in the global scope only; a stage that does not
+# redeclare them sees empty strings, and an empty GOOS/GOARCH silently falls
+# back to the builder's own platform — producing an arm64 binary in an amd64
+# image, which fails at exec time with "exec format error".
+ARG TARGETOS
+ARG TARGETARCH
+# CGO off yields a static binary that runs on a distroless/scratch base, and
+# removes the need for a target C toolchain when cross-compiling.
 ENV CGO_ENABLED=0
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w" -o /out/app %s
 
 # gcr.io/distroless/static carries no shell and no package manager, which is the

@@ -140,15 +140,55 @@ Where buidl differs from Kamal: releases are immutable and digest-pinned rather 
 
 ## Install
 
+> **No release has been published yet.** The release workflow exists
+> (`.github/workflows/release.yml`, triggered by a `v*` tag) but no tag has been
+> pushed through it, so the download URLs below 404 today. Until the first
+> release is cut, use `go install` or build from source. The workflow that
+> `buidl init` generates also curls that URL, so a generated pipeline needs the
+> same substitution for now.
+
+Download the binary for your platform (`linux`/`darwin`, `amd64`/`arm64`):
+
+```sh
+curl -fsSL -o buidl \
+  https://github.com/danewalker/buidl/releases/latest/download/buidl-darwin-arm64
+chmod +x buidl
+sudo mv buidl /usr/local/bin/buidl
+```
+
+The binaries are static (`CGO_ENABLED=0`) and built with `-trimpath`, so there
+is no glibc version floor and no build-host paths inside them.
+
+**Verifying a download.** Every release publishes a `checksums.txt` covering all
+four binaries. Fetch it alongside the binary and check the one you took:
+
+```sh
+curl -fsSL -O https://github.com/danewalker/buidl/releases/latest/download/checksums.txt
+sha256sum --ignore-missing -c checksums.txt   # shasum -a 256 -c on macOS
+```
+
+The file lists bare names, so this works with the downloaded binary sitting next
+to it. `--ignore-missing` is what lets you verify one platform's binary against a
+manifest listing all four.
+
+The release job also asserts that the binary's `--version` matches the tag before
+publishing, so `buidl --version` is a reliable statement of which release you have.
+
+**With Go installed:**
+
 ```sh
 go install github.com/danewalker/buidl/cmd/buidl@latest
 ```
 
-Or build from source:
+This builds from source at the latest tag. Note that `go install` does not set
+the version stamp, so the binary reports `dev` — the `-ldflags` are only applied
+by the Makefile and the release workflow.
+
+**From source:**
 
 ```sh
 make build      # ./bin/buidl
-make install    # $GOPATH/bin/buidl
+make install    # $GOPATH/bin/buidl, version stamped from `git describe`
 ```
 
 ## Quick start
@@ -499,7 +539,7 @@ The Kubernetes deploy backend and the k3s/RKE2 cluster installer are implemented
 ### Honest caveats
 
 - **`accessories` does nothing.** It parses and validates, but no accessory is ever reconciled. Do not rely on it.
-- **The install instructions do not work yet** — there are no published release binaries. Build from source.
+- **The binary downloads do not work yet** — the release workflow is written but no tag has been pushed through it, so nothing is published. `go install` and building from source both work. The CI workflow `buidl init` generates curls that same missing URL.
 - Coverage is ~39%, concentrated in pure logic. Cluster and registry I/O are covered by the acceptance suite instead.
 - Real-world testing found ~25 bugs across three environments, several of which no amount of unit testing would have caught (a use-after-close on a cached SSH connection, an image `USER` that Kubernetes refuses to verify, a rollback losing a write race to the Deployment controller). Treat unexercised paths with suspicion.
 
