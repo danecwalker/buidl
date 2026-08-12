@@ -128,6 +128,28 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientConfig)
 	if err != nil {
 		conn.Close()
+
+		// A server typically offers several host key types (ed25519, ecdsa, rsa)
+		// while known_hosts records only the one seen first. If Go negotiates a
+		// type we have no entry for, knownhosts reports it as a *mismatch* —
+		// indistinguishable, in its error, from an actual machine-in-the-middle.
+		//
+		// The recorded entries are in the error itself, so the algorithms we can
+		// actually verify are recoverable from it. Retrying constrained to those
+		// is what OpenSSH does natively.
+		if algorithms := recordedHostKeyAlgorithms(err); len(algorithms) > 0 {
+			clientConfig.HostKeyAlgorithms = algorithms
+
+			retryConn, dialErr := dialer.DialContext(ctx, "tcp", addr)
+			if dialErr == nil {
+				sshConn, chans, reqs, err = ssh.NewClientConn(retryConn, addr, clientConfig)
+				if err == nil {
+					return &Client{cfg: cfg, client: ssh.NewClient(sshConn, chans, reqs), addr: addr}, nil
+				}
+				retryConn.Close()
+			}
+		}
+
 		return nil, describeHandshakeError(cfg, addr, err)
 	}
 
@@ -136,6 +158,38 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 		client: ssh.NewClient(sshConn, chans, reqs),
 		addr:   addr,
 	}, nil
+}
+
+// recordedHostKeyAlgorithms extracts the key types known_hosts holds for a host,
+// taken from a knownhosts.KeyError.
+//
+// KeyError.Want lists the entries that matched the hostname but not the offered
+// key. Their types are exactly the algorithms that can be verified, so
+// constraining the next handshake to them turns a spurious "mismatch" into a
+// successful, still fully verified connection.
+//
+// Returns nil when the host is genuinely unknown (Want empty), so a real
+// unknown-host error is never silently retried into success.
+func recordedHostKeyAlgorithms(err error) []string {
+	var keyErr *knownhosts.KeyError
+	if !errors.As(err, &keyErr) || len(keyErr.Want) == 0 {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	var algorithms []string
+	for _, known := range keyErr.Want {
+		if known.Key == nil {
+			continue
+		}
+		keyType := known.Key.Type()
+		if seen[keyType] {
+			continue
+		}
+		seen[keyType] = true
+		algorithms = append(algorithms, keyType)
+	}
+	return algorithms
 }
 
 // describeHandshakeError turns SSH's terse failures into actionable messages.

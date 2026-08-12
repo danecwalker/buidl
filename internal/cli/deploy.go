@@ -9,6 +9,7 @@ import (
 	"github.com/danewalker/buidl/internal/build"
 	"github.com/danewalker/buidl/internal/cluster"
 	"github.com/danewalker/buidl/internal/deploy"
+	"github.com/danewalker/buidl/internal/gitinfo"
 	"github.com/danewalker/buidl/internal/hooks"
 )
 
@@ -368,11 +369,14 @@ cluster work alone.`,
 				}
 				clusterChangesPending = clusterPlan.HasChanges()
 
-				// Only target the managed cluster's context once we know the cluster
-				// is actually there; pointing at a context that does not exist yet
-				// would produce a misleading error.
+				// Only target the managed cluster once we know this machine holds
+				// its credentials. Writing the field unconditionally also bypasses
+				// the identical guard in target(), so plan would fail on a fresh
+				// machine or CI runner against a perfectly healthy cluster.
 				if !clusterChangesPending && a.cfg.Deploy.Kubernetes.Context == "" {
-					a.cfg.Deploy.Kubernetes.Context = a.defaultContextName()
+					if name := a.defaultContextName(); cluster.ContextExists(name) {
+						a.cfg.Deploy.Kubernetes.Context = name
+					}
 				}
 				a.log.Info("")
 			}
@@ -491,6 +495,13 @@ Example:
 			if err := a.requireConfig(ctx); err != nil {
 				return err
 			}
+			// Without this, promote reads the source's state from whatever
+			// kubeconfig context happens to be current — a different cluster on a
+			// CI runner or a colleague's machine. Reading the wrong cluster is
+			// worse than failing, because the digest it returns looks plausible.
+			if err := a.ensureClusterCredentials(cmd); err != nil {
+				return err
+			}
 
 			sourceTarget, err := a.target()
 			if err != nil {
@@ -514,6 +525,10 @@ Example:
 				return err
 			}
 
+			if err := a.ensureClusterCredentials(cmd); err != nil {
+				return err
+			}
+
 			if err := a.confirmProduction(cmd, yes); err != nil {
 				return err
 			}
@@ -528,6 +543,17 @@ Example:
 			rel := a.newRelease(status.Release)
 			rel.Digest = status.Digest
 
+			// Carry the source release's provenance rather than the local working
+			// tree's. A promotion ships an artifact built from some other commit,
+			// possibly days ago; annotating it with whatever is checked out here
+			// would make `status` and `releases` report a commit that has nothing
+			// to do with the running image — and a later rollback would restore
+			// those wrong annotations, making the error permanent.
+			rel.Git = gitinfo.Info{
+				Available: status.GitSHA != "",
+				SHA:       status.GitSHA,
+			}
+
 			target, err := a.target()
 			if err != nil {
 				return err
@@ -535,15 +561,33 @@ Example:
 			defer target.Close()
 
 			req := a.deployRequest(rel, secretValues, !noWait, true)
+			hookCtx := a.hookContext(rel, secretValues, "")
 
 			a.log.Step("Preflight checks")
 			if err := target.Preflight(ctx, req); err != nil {
 				return err
 			}
 
+			// Migrations belong here just as much as on a deploy: promote is the
+			// staging-to-production path, which is exactly where a schema change
+			// must land before the new code serves.
+			if err := a.runHook(ctx, hooks.PreDeploy, hookCtx); err != nil {
+				a.log.FailStep(err)
+				a.runFailureHook(ctx, hookCtx)
+				return err
+			}
+
 			a.log.Step(fmt.Sprintf("Promoting %s -> %s", from, to))
 			outcome, err := target.Deploy(ctx, req)
 			if err != nil {
+				a.log.FailStep(err)
+				a.reportPartialFailure(outcome)
+				a.runFailureHook(ctx, hookCtx)
+				return err
+			}
+
+			hookCtx.URL = outcome.URL
+			if err := a.runHook(ctx, hooks.PostDeploy, hookCtx); err != nil {
 				return err
 			}
 

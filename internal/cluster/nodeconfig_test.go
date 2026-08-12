@@ -233,7 +233,7 @@ func TestLabelsAndTaintsRender(t *testing.T) {
 
 func TestRenderIsDeterministic(t *testing.T) {
 	// An unstable render would rewrite the config file and restart the service on
-	// every `cluster up`, causing a needless API outage each run.
+	// every deploy, causing a needless API outage each run.
 	server := inventory.Server{
 		Host:   "10.0.1.1",
 		Role:   inventory.RoleWorker,

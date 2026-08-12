@@ -92,6 +92,40 @@ func (a *App) clusterPlan(ctx context.Context) (*cluster.Manager, *cluster.Plan,
 	return mgr, plan, nil
 }
 
+// ensureClusterCredentials makes sure this machine can address the managed
+// cluster for the currently loaded environment.
+//
+// Unlike convergeCluster this installs nothing — it only resolves, and if
+// necessary fetches, the kubeconfig context. Commands that operate on an
+// existing cluster need that: without it they silently fall through to whatever
+// context happens to be current, which on a colleague's laptop or a CI runner is
+// a different cluster entirely. Reading the wrong cluster's state is worse than
+// failing, because the answer looks plausible.
+func (a *App) ensureClusterCredentials(cmd *cobra.Command) error {
+	if a.cfg.Infra == nil || a.cfg.Deploy.Kubernetes.Context != "" {
+		return nil
+	}
+
+	contextName := a.defaultContextName()
+	if cluster.ContextExists(contextName) {
+		a.cfg.Deploy.Kubernetes.Context = contextName
+		return nil
+	}
+
+	mgr, err := cluster.New(a.cfg.Infra, a.log)
+	if err != nil {
+		return err
+	}
+	defer mgr.Close()
+
+	a.log.Detail("no local credentials for %s; fetching", contextName)
+	if err := a.fetchKubeconfig(cmd, mgr, contextName, "", false); err != nil {
+		return fmt.Errorf("cannot obtain credentials for the %s cluster: %w", a.cfg.Environment, err)
+	}
+	a.cfg.Deploy.Kubernetes.Context = contextName
+	return nil
+}
+
 // errClusterUnknown is returned when no server could be inspected.
 //
 // This must be a hard error rather than a warning: with nothing known about any
@@ -105,7 +139,7 @@ func errClusterUnknown() error {
 // convergeCluster brings the cluster to its planned state and wires up
 // credentials, so an app deploy can proceed against it.
 //
-// This is the path that replaces a separate `cluster up`: a fresh fleet and an
+// This is the path that replaces a separate bootstrap command: a fresh fleet and an
 // established cluster take the same command, because the plan already knows the
 // difference.
 func (a *App) convergeCluster(cmd *cobra.Command, mgr *cluster.Manager, plan *cluster.Plan, yes bool) error {
@@ -570,7 +604,7 @@ func newClusterInventoryCmd(a *App) *cobra.Command {
 		Long: `Print the fleet after defaults and role inference have been applied.
 
 Useful for confirming what buidl thinks it will act on before running
-` + "`cluster up`" + ` — particularly which machine will become the bootstrap
+` + "`buidl deploy`" + ` — particularly which machine will become the bootstrap
 control plane.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

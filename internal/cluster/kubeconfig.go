@@ -38,7 +38,7 @@ func (m *Manager) Kubeconfig(ctx context.Context, contextName string) (*clientcm
 
 	raw, err := client.ReadFile(ctx, m.distro.KubeconfigPath())
 	if err != nil {
-		return nil, fmt.Errorf("reading the kubeconfig from %s: %w\n\nhint: has the cluster been created? try `buidl cluster up`", bootstrap.Host, err)
+		return nil, fmt.Errorf("reading the kubeconfig from %s: %w\n\nhint: has the cluster been created? run `buidl deploy`, which installs it if needed", bootstrap.Host, err)
 	}
 
 	cfg, err := clientcmd.Load([]byte(raw))

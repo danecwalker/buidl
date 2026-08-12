@@ -74,7 +74,7 @@ type ClusterKubernetes struct {
 
 	// Version pins the distribution release, e.g. "v1.34.1+k3s1". Empty installs
 	// the distribution's current stable, which is convenient for a first cluster
-	// but means two `cluster up` runs months apart can install different
+	// but means two deploys months apart can install different
 	// versions — pin it for anything you intend to keep.
 	Version string `yaml:"version"`
 
@@ -109,7 +109,7 @@ type ClusterKubernetes struct {
 // Addons are cluster components buidl can install after bootstrap.
 type Addons struct {
 	// BuildKit installs an in-cluster rootless buildkitd, so `buidl deploy` works
-	// immediately after `buidl cluster up` with no builder to set up separately
+	// immediately once the cluster exists, with no builder to set up separately
 	// and no privileged CI runner.
 	BuildKit bool `yaml:"buildkit"`
 

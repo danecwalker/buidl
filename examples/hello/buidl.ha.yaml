@@ -1,0 +1,103 @@
+# Three-control-plane cluster, and a promote test across two environments.
+#
+# Two things here have never run in the real world:
+#
+#   1. HA join ordering — additional control planes must join one at a time,
+#      because two etcd members joining concurrently can cost the cluster its
+#      quorum. This is the riskiest unexercised code in the project.
+#
+#   2. `buidl promote` — deploying the exact digest running in one environment
+#      to another, with no rebuild. It is a headline feature that has never
+#      been executed once.
+#
+#   buidl deploy  -e ha-staging -f buidl.ha.yaml
+#   buidl promote --from ha-staging --to ha-production -f buidl.ha.yaml
+version: 1
+
+app: hello
+image: ghcr.io/danecwalker/buidl-hello
+
+registry:
+  createPullSecret: true
+
+build:
+  driver: buildkit
+  dockerfile: Dockerfile
+  platforms: [linux/amd64]
+
+deploy:
+  target: kubernetes
+  port: 8080
+  replicas: 2
+
+  healthcheck:
+    path: /up
+
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+  strategy:
+    type: rolling
+    maxUnavailable: "0"
+    maxSurge: 50%
+
+  deployTimeout: 120s
+  drainTimeout: 10s
+
+env:
+  clear:
+    LOG_LEVEL: info
+    GREETING: hello
+    FAIL_READINESS: ${FAIL_READINESS:-0}
+    CRASH_ON_BOOT: ${CRASH_ON_BOOT:-0}
+    BOOT_DELAY: ${BOOT_DELAY:-0}
+  secret: [DEMO_SECRET]
+
+infra:
+  ssh:
+    user: root
+    acceptNewHostKeys: true
+
+  kubernetes:
+    distribution: k3s
+    version: v1.33.5+k3s1
+    # Required with more than one control plane: without a stable address every
+    # node would hard-code the bootstrap machine, and losing it would break
+    # future joins and every kubeconfig.
+    #
+    # Pointing at the first node tests the join ordering, which is what is under
+    # test here. A production cluster needs a load balancer or DNS record
+    # fronting all three, or this address becomes the single point of failure
+    # that HA was meant to remove.
+    controlPlaneEndpoint: 45.77.233.71
+    tlsSANs: [45.77.233.71, 45.32.191.119, 45.63.26.34]
+
+  addons:
+    certManager: false
+    metricsServer: false
+    buildkit: false
+
+  servers:
+    - {host: 45.77.233.71, role: control-plane}
+    - {host: 45.32.191.119, role: control-plane}
+    - {host: 45.63.26.34, role: control-plane}
+
+environments:
+  # Source environment for the promotion.
+  ha-staging:
+    deploy:
+      replicas: 2
+      kubernetes:
+        namespace: hello-staging
+        createNamespace: true
+
+  # Destination. Separate namespace because a Deployment's selector includes the
+  # environment and selectors are immutable, so two environments cannot share one
+  # namespace.
+  ha-production:
+    deploy:
+      replicas: 3
+      kubernetes:
+        namespace: hello-production
+        createNamespace: true

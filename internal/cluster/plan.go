@@ -81,7 +81,7 @@ type NodePlan struct {
 	Config string
 }
 
-// Plan is the full set of changes `cluster up` would make.
+// Plan is the full set of changes converging the cluster would make.
 type Plan struct {
 	Distro     Distro
 	Kubernetes config.ClusterKubernetes
@@ -233,7 +233,7 @@ func (m *Manager) probe(ctx context.Context, server inventory.Server) Facts {
 	return f
 }
 
-// Plan computes what `cluster up` would do, without changing anything.
+// Plan computes what convergence would do, without changing anything.
 func (m *Manager) Plan(ctx context.Context) (*Plan, error) {
 	inv, err := m.provider.Resolve(ctx)
 	if err != nil {
@@ -377,7 +377,7 @@ func (m *Manager) Plan(ctx context.Context) (*Plan, error) {
 // configDiffers reports whether the rendered config differs from what is on disk.
 //
 // Comparing before writing avoids restarting a healthy node's service on every
-// `cluster up`, which would otherwise cause a brief API server outage per run.
+// convergence, which would otherwise cause a brief API server outage per run.
 func (m *Manager) configDiffers(ctx context.Context, server inventory.Server, rendered string) (bool, error) {
 	client, err := m.connect(ctx, server)
 	if err != nil {

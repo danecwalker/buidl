@@ -1,0 +1,92 @@
+# buidl's own CI. Distinct from the workflow `buidl init` generates for user
+# projects (internal/cli/ci_template.go) — this one tests buidl itself.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "go.mod/go.sum are not tidy; run 'go mod tidy'"
+            git diff go.mod go.sum
+            exit 1
+          fi
+
+      # -race matters more than usual here: the SSH client cache, the concurrent
+      # fact-gathering across servers, and the spinner goroutine all write from
+      # multiple goroutines.
+      - name: Test
+        run: go test -race ./...
+
+      - name: Coverage
+        run: |
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Build
+        run: make build
+
+      # The binary must actually run. A build succeeding says nothing about
+      # whether the command tree is wired up.
+      - name: Smoke test
+        run: |
+          ./bin/buidl --version
+          ./bin/buidl --help > /dev/null
+          ./bin/buidl config --help > /dev/null
+
+      # `init` must produce a config that passes buidl's own validation. This
+      # caught a real bug: the placeholder image reference was uppercase, which
+      # is invalid, so plain `buidl init` wrote a file that failed to load.
+      - name: init produces a valid project
+        run: |
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          git init -q .
+          printf 'module example.com/smoke\n\ngo 1.25\n' > go.mod
+          echo 'package main' > main.go
+          "$GITHUB_WORKSPACE/bin/buidl" init --no-ci
+          "$GITHUB_WORKSPACE/bin/buidl" config validate
+
+  # Cross-compilation is what the release job depends on, so it is verified on
+  # every change rather than discovered at tag time.
+  build-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Cross-compile every released platform
+        run: make release
+      - name: Show artifacts
+        run: ls -lh dist/

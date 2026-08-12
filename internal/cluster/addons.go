@@ -224,7 +224,7 @@ func metricsServerAddon() Addon {
 
 // buildKitAddon installs a rootless in-cluster buildkitd.
 //
-// This closes the loop on buidl's build story: after `cluster up`, `buidl deploy`
+// This closes the loop on buidl's build story: once the cluster exists, `buidl deploy`
 // has a builder without anyone installing Docker, running a privileged container,
 // or configuring a CI runner.
 func buildKitAddon() Addon {

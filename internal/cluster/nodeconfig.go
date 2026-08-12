@@ -14,7 +14,7 @@ import (
 //
 // Driving everything through a config file rather than command-line flags matters
 // for idempotency: re-running the installer picks up the same file, so a repeated
-// `cluster up` converges instead of producing a differently-flagged unit. It also
+// convergence produces the same unit instead of a differently-flagged one. It also
 // keeps the join token out of the process list and shell history.
 //
 // k3s and RKE2 accept the same keys for everything buidl sets, so one struct
@@ -117,7 +117,7 @@ func renderNodeConfig(
 		return "", fmt.Errorf("rendering node config: %w", err)
 	}
 
-	header := fmt.Sprintf("# Managed by buidl. Edits are overwritten on the next `buidl cluster up`.\n# node: %s (%s)\n", server.Host, role)
+	header := fmt.Sprintf("# Managed by buidl. Edits are overwritten on the next deploy.\n# node: %s (%s)\n", server.Host, role)
 	return header + string(out), nil
 }
 
