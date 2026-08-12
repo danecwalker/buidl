@@ -234,8 +234,31 @@ func toUnstructured(obj runtime.Object, gvk schema.GroupVersionKind) (*unstructu
 	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
 	unstructured.RemoveNestedField(u.Object, "spec", "template", "metadata", "creationTimestamp")
 	unstructured.RemoveNestedField(u.Object, "status")
+	stripVolumeClaimTemplateNoise(u)
 
 	return u, nil
+}
+
+// stripVolumeClaimTemplateNoise removes the same server-owned fields from a
+// StatefulSet's volumeClaimTemplates.
+//
+// Each template is a full PersistentVolumeClaim, so it carries its own null
+// creationTimestamp and an empty status — the identical problem the top-level
+// strip above solves, one level down where the top-level strip cannot reach.
+func stripVolumeClaimTemplateNoise(u *unstructured.Unstructured) {
+	templates, found, err := unstructured.NestedSlice(u.Object, "spec", "volumeClaimTemplates")
+	if err != nil || !found {
+		return
+	}
+	for _, entry := range templates {
+		claim, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		unstructured.RemoveNestedField(claim, "metadata", "creationTimestamp")
+		unstructured.RemoveNestedField(claim, "status")
+	}
+	_ = unstructured.SetNestedSlice(u.Object, templates, "spec", "volumeClaimTemplates")
 }
 
 func contextNames(contexts map[string]*clientcmdapi.Context) string {

@@ -25,6 +25,10 @@ func fieldChanges(kind string, live, desired *unstructured.Unstructured) []deplo
 	switch kind {
 	case "Deployment":
 		return deploymentFieldChanges(live, desired)
+	case "StatefulSet":
+		// An accessory's interesting fields sit at the same paths: a pod template
+		// is a pod template whatever owns it.
+		return deploymentFieldChanges(live, desired)
 	case "Service":
 		return serviceFieldChanges(live, desired)
 	case "Ingress":
@@ -268,17 +272,26 @@ func impactOf(kind string, action deploy.Action, fields []deploy.FieldChange, re
 		}
 		// Any pod-template field forces new pods; metadata-only edits do not.
 		for _, f := range fields {
-			switch f.Field {
-			case "image", "port", "command", "secret values",
-				"env added", "env removed", "env changed",
-				"cpu request", "memory request", "cpu limit", "memory limit",
-				"health path", "serviceAccount", "gracePeriod":
+			if podTemplateField(f.Field) {
 				return fmt.Sprintf("replaces %s", pluralInstances(replicas))
 			}
 		}
 		for _, f := range fields {
 			if f.Field == "replicas" {
 				return fmt.Sprintf("scales to %s", f.To)
+			}
+		}
+		return "no restart"
+
+	case "StatefulSet":
+		// Phrased in the singular and in terms of the data, because that is what a
+		// reviewer approving a change to a database needs to weigh.
+		if action == deploy.ActionCreate {
+			return "creates the accessory and its storage"
+		}
+		for _, f := range fields {
+			if podTemplateField(f.Field) {
+				return "restarts the accessory"
 			}
 		}
 		return "no restart"
@@ -319,6 +332,19 @@ func impactOf(kind string, action deploy.Action, fields []deploy.FieldChange, re
 		}
 	}
 	return ""
+}
+
+// podTemplateField reports whether a change to this field lives in the pod
+// template, and therefore replaces running pods rather than editing an object.
+func podTemplateField(name string) bool {
+	switch name {
+	case "image", "port", "command", "secret values",
+		"env added", "env removed", "env changed",
+		"cpu request", "memory request", "cpu limit", "memory limit",
+		"health path", "serviceAccount", "gracePeriod":
+		return true
+	}
+	return false
 }
 
 func pluralInstances(n int32) string {

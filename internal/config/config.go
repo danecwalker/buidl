@@ -289,10 +289,12 @@ type Proxy struct {
 
 // Accessory is a supporting stateful service (database, cache, queue) deployed
 // alongside the app. Modeled on Kamal's accessories, rendered as a StatefulSet
-// plus a headless Service when Storage is set.
+// plus a headless Service, with a PersistentVolumeClaim template when Storage
+// is set.
 //
-// Accessories are deliberately not reconciled on every deploy; they are managed
-// by `buidl accessory` so an app rollout can never restart your database.
+// Accessories are deliberately not reconciled on every deploy: the backend
+// renders them separately and applies them only when asked explicitly, so an app
+// rollout can never restart your database.
 type Accessory struct {
 	Image string   `yaml:"image"`
 	Port  int32    `yaml:"port"`
