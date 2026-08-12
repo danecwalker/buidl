@@ -349,6 +349,91 @@ func TestGenerateDockerfileNodeInstallsProdDepsAfterCopy(t *testing.T) {
 	}
 }
 
+// TestGenerateDockerfileGoCrossCompiles covers the case that motivated the
+// change: an arm64 laptop building for linux/amd64. Go must cross-compile on
+// the builder's own architecture rather than run the toolchain under QEMU.
+func TestGenerateDockerfileGoCrossCompiles(t *testing.T) {
+	content, err := GenerateDockerfile(Detection{
+		Stack: KindGo, Name: "api", Port: 8080, MainPackage: "./cmd/api", Runtime: "1.25",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The compiler stage runs natively; anything else means emulation.
+	if !strings.Contains(content, "FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build") {
+		t.Errorf("build stage must be pinned to the builder's platform:\n%s", content)
+	}
+
+	// BuildKit's platform args are global-scope only. Undeclared, they expand to
+	// empty and go build silently targets the builder's own architecture.
+	for _, arg := range []string{"ARG TARGETOS", "ARG TARGETARCH"} {
+		if !strings.Contains(content, arg+"\n") {
+			t.Errorf("missing %q; the platform arg is unusable inside a stage without it", arg)
+		}
+	}
+	if !strings.Contains(content, "GOOS=$TARGETOS GOARCH=$TARGETARCH") {
+		t.Errorf("go build must be told the target platform:\n%s", content)
+	}
+
+	// Declaration has to precede the build that consumes it.
+	if strings.Index(content, "ARG TARGETARCH") > strings.Index(content, "GOOS=$TARGETOS") {
+		t.Error("ARG TARGETARCH must be declared before the go build that uses it")
+	}
+
+	// The runtime stage must stay unqualified so BuildKit resolves it to the
+	// target platform; pinning it would ship a builder-architecture base image.
+	if strings.Contains(content, "FROM --platform=$BUILDPLATFORM gcr.io/distroless") {
+		t.Error("runtime stage must resolve to the target platform, not the builder's")
+	}
+
+	// Cross-compiling with cgo would need a target C toolchain that is not here.
+	if !strings.Contains(content, "CGO_ENABLED=0") {
+		t.Error("cross-compilation requires cgo to stay off")
+	}
+}
+
+// TestGenerateDockerfileRuntimeStagesMatchTargetPlatform guards the invariant
+// that produces "exec format error" when it is broken: any stage whose output
+// is copied into the runtime image must be built for the target architecture.
+func TestGenerateDockerfileRuntimeStagesMatchTargetPlatform(t *testing.T) {
+	// Native modules, compiled Python extensions and native gems are all copied
+	// into the runtime image, so their build stages must not be pinned.
+	stacks := []Detection{
+		{Stack: KindNode, Name: "web", Port: 3000, PackageManager: PMNpm, Runtime: "22", StartCommand: "node index.js"},
+		{Stack: KindPython, Name: "api", Port: 8000, PackageManager: PMUv, Runtime: "3.13"},
+		{Stack: KindRuby, Name: "web", Port: 3000, Framework: "rails", Runtime: "3.4"},
+		{Stack: KindRust, Name: "svc", Port: 8080, BinaryName: "svc"},
+	}
+
+	for _, d := range stacks {
+		t.Run(string(d.Stack)+"-"+d.Name, func(t *testing.T) {
+			content, err := GenerateDockerfile(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(content, "--platform=$BUILDPLATFORM") {
+				t.Errorf("%s produces target-architecture artifacts; pinning a stage to the builder would ship unloadable binaries:\n%s", d.Stack, content)
+			}
+		})
+	}
+
+	// A Vite build is the exception: only bundled assets cross into nginx, so
+	// the bundler can run natively.
+	content, err := GenerateDockerfile(Detection{
+		Stack: KindNode, Name: "spa", Port: 80, PackageManager: PMPnpm, Framework: "vite", Runtime: "22",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "FROM --platform=$BUILDPLATFORM node:22-alpine AS build") {
+		t.Errorf("SPA asset build emits architecture-independent output and should run natively:\n%s", content)
+	}
+	if strings.Contains(content, "FROM --platform=$BUILDPLATFORM nginx") {
+		t.Error("the nginx runtime must resolve to the target platform")
+	}
+}
+
 func TestGenerateDockerfileUnknownStackFails(t *testing.T) {
 	_, err := GenerateDockerfile(Detection{Stack: KindUnknown})
 	if err == nil {

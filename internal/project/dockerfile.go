@@ -90,6 +90,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w" -o /out/app %s
 
+# No --platform here: the runtime stage must be the target's architecture, and
+# BuildKit resolves an unqualified FROM to the platform being built.
+#
 # gcr.io/distroless/static carries no shell and no package manager, which is the
 # smallest sane attack surface for a static Go binary.
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
@@ -132,6 +135,14 @@ func nodeDockerfile(d Detection) string {
 	}
 
 	return header() + fmt.Sprintf(`
+# None of these stages is pinned to $BUILDPLATFORM, and that is intentional.
+# The installed node_modules ends up in the runtime image, and npm resolves
+# prebuilt binaries by the architecture it is running on: node-gyp addons
+# (bcrypt, better-sqlite3, sharp) and platform-specific optional dependencies
+# (@rollup/rollup-linux-*, @esbuild/linux-*) would all be fetched or compiled
+# for the builder. The image would then crash at startup with "invalid ELF
+# header". Building on the target platform — under emulation when they differ —
+# is the price of a node_modules tree that matches the runtime.
 FROM node:%s-alpine AS deps
 WORKDIR /app
 %s
@@ -181,7 +192,12 @@ func staticNodeDockerfile(d Detection, version string) string {
 	}
 
 	return header() + fmt.Sprintf(`
-FROM node:%s-alpine AS build
+# Safe to pin to the builder's architecture: only /app/dist crosses into the
+# runtime stage, and bundled JS/CSS is architecture-independent. The bundler's
+# own native binaries stay behind in this stage, so nothing arch-specific is
+# ever copied out — which is what makes this different from the Node server
+# template, where node_modules ships in the image.
+FROM --platform=$BUILDPLATFORM node:%s-alpine AS build
 WORKDIR /app
 %sCOPY %s ./
 RUN %s
@@ -267,6 +283,12 @@ RUN python -m venv /app/.venv \
 	}
 
 	return header() + fmt.Sprintf(`
+# Not pinned to $BUILDPLATFORM: pip and uv select manylinux wheels by the
+# interpreter's own architecture, and the resulting .venv — compiled extensions
+# and all (pydantic-core, psycopg, numpy) — is copied into the runtime image.
+# Building it on the builder's architecture would produce a venv whose .so
+# files the runtime interpreter cannot load. Emulation is the correct tradeoff
+# here; there is no equivalent of GOARCH for a CPython extension.
 FROM python:%s-slim AS build
 WORKDIR /app
 %sENV PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -313,6 +335,10 @@ RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
 	}
 
 	return header() + fmt.Sprintf(`
+# Not pinned to $BUILDPLATFORM: bundle install compiles native gem extensions
+# (pg, nokogiri, bootsnap) and the whole BUNDLE_PATH is copied into the runtime
+# image, so those .so files must be built for the target architecture. Under a
+# cross-platform build this stage runs emulated, which is slow but correct.
 FROM ruby:%s-slim AS build
 WORKDIR /app
 
@@ -364,6 +390,20 @@ func rustDockerfile(d Detection) string {
 	}
 
 	return header() + fmt.Sprintf(`
+# Deliberately NOT pinned to $BUILDPLATFORM, unlike the Go template.
+#
+# rustc can cross-compile, but doing it here would mean: mapping $TARGETARCH to
+# a target triple, "rustup target add" for it, installing a cross linker plus
+# the target's glibc headers, and setting CARGO_TARGET_<TRIPLE>_LINKER. That
+# holds only for pure-Rust dependency trees — any crate with a build.rs that
+# compiles C (openssl-sys, libsqlite3-sys, ring, anything using cc) then needs a
+# full target sysroot too, and fails with a link error that is far harder to
+# diagnose than a slow build. Since this file is generated for a project whose
+# dependencies are unknown, correctness beats speed: this stage emulates under
+# QEMU when the target differs from the builder.
+#
+# If your crate has no C dependencies, cross-compiling here is worth doing by
+# hand — buidl never regenerates this file, so the edit is safe.
 FROM rust:%s-slim AS build
 WORKDIR /src
 
