@@ -49,8 +49,10 @@ First tagged release.
 
 ### Known limitations
 
-- **`accessories` is modeled in the configuration schema but not implemented.**
-  It parses and validates, and then nothing is deployed.
+- **Accessories have never been applied to a real cluster.** They render, plan
+  and apply, but only unit tests have exercised them.
+- Accessories are never pruned, are fixed at one replica, and their rollout is
+  not waited on.
 - No published release binaries yet, so the documented `curl` install does not
   work. Build from source.
 - RKE2, blue-green cutover, version upgrades against a running cluster and

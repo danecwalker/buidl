@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/danewalker/buidl/internal/build"
 	"github.com/danewalker/buidl/internal/deploy"
 	"github.com/danewalker/buidl/internal/hooks"
@@ -441,4 +443,26 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// confirm asks a yes/no question and turns anything but an explicit yes into
+// the supplied cancellation error.
+//
+// Callers are responsible for deciding whether a prompt is warranted at all —
+// this is only reached once they have. A read error means there is no usable
+// stdin, which is treated as declining: a destructive command must never
+// proceed because nobody was there to say no.
+func (a *App) confirm(cmd *cobra.Command, question, cancelled string) error {
+	fmt.Fprintf(cmd.OutOrStdout(), "%s [y/N] ", question)
+
+	var answer string
+	if _, err := fmt.Fscanln(cmd.InOrStdin(), &answer); err != nil {
+		return fmt.Errorf("%s", cancelled)
+	}
+	switch answer {
+	case "y", "Y", "yes", "Yes":
+		return nil
+	default:
+		return fmt.Errorf("%s", cancelled)
+	}
 }

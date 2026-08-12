@@ -298,20 +298,9 @@ func (a *App) confirmProduction(cmd *cobra.Command, yes bool) error {
 		return nil
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "About to deploy %s to %s (cluster: %s).\nContinue? [y/N] ",
+	fmt.Fprintf(cmd.OutOrStdout(), "About to deploy %s to %s (cluster: %s).\n",
 		a.cfg.App, a.cfg.Environment, a.clusterDescription())
-
-	var answer string
-	// A read error means no usable stdin, which is the same as declining.
-	if _, err := fmt.Fscanln(cmd.InOrStdin(), &answer); err != nil {
-		return fmt.Errorf("deploy cancelled")
-	}
-	switch answer {
-	case "y", "Y", "yes", "Yes":
-		return nil
-	default:
-		return fmt.Errorf("deploy cancelled")
-	}
+	return a.confirm(cmd, "Continue?", "deploy cancelled")
 }
 
 // clusterDescription names the cluster a command is about to change.

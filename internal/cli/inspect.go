@@ -304,12 +304,11 @@ workflow, or to hand it to another tool:
 				return fmt.Errorf("`manifest` is only supported for the kubernetes target")
 			}
 
-			// Rendering is pure: it reads the config and the release and touches no
-			// API server. Constructing a real target here would load a kubeconfig and
-			// build clients, so the documented GitOps use — `buidl manifest -e
+			// Deliberately not a.target(): that loads a kubeconfig and builds
+			// clients, so the documented GitOps use — `buidl manifest -e
 			// production | kubectl apply -f -`, whose whole point is not needing
 			// cluster access — failed on any machine without one.
-			renderer := &kubernetes.Target{Namespace: a.cfg.Deploy.Kubernetes.Namespace}
+			renderer := kubernetes.NewRenderer(a.cfg, a.log)
 
 			out, err := renderer.ManifestYAML(a.deployRequest(rel, secretValues, false, false))
 			if err != nil {

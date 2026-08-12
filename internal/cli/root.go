@@ -113,6 +113,7 @@ Every deploy is a release you can inspect, promote, and roll back:
 		newManifestCmd(app),
 		newConfigCmd(app),
 		newClusterCmd(app),
+		newAccessoryCmd(app),
 		newEnvCmd(app),
 		newHooksCmd(app),
 	)

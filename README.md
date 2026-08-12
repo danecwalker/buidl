@@ -357,6 +357,35 @@ registry:
 
 `createPullSecret` copies a credential from this machine into the cluster, which is a real trust decision — hence opt-in. When a pull fails with `unauthorized` and no pull secret exists, buidl says so and names the fix rather than leaving you with the kubelet's message.
 
+### Accessories
+
+Databases, caches and queues declared alongside the app:
+
+```yaml
+accessories:
+  postgres:
+    image: postgres:17
+    port: 5432
+    storage: 20Gi              # omit for an ephemeral accessory
+    env:
+      secret: [POSTGRES_PASSWORD]
+```
+
+Each becomes a StatefulSet with a headless Service, so `postgres` resolves at `web-postgres` inside the namespace, and its volume follows its pod.
+
+**`buidl deploy` never touches them.** An app deploy runs many times a day and replaces every pod it owns; a restarted database must never be a side effect of shipping a web app — the failure mode, a Postgres pod cycled because someone changed a log level, is unrecoverable in a way an app rollout never is. So accessories live behind their own verb:
+
+```sh
+buidl accessory plan       # what reconciling would change, and what it would restart
+buidl accessory apply      # reconcile; prompts before anything that restarts a pod
+```
+
+The cost of that split is real: an accessory can drift from its configuration until someone reconciles it. `accessory plan` is how that drift is seen, and drift you can see beats an implicit restart you cannot undo.
+
+Two consequences follow from the same reasoning. An accessory's pod template carries only its secret checksum — the release ID, deploy timestamp and version label all change every release, and a changed pod template is a restarted database. And accessory labels deliberately differ from the app's, or the app's Service and PodDisruptionBudget selectors would match the database pod and route HTTP traffic to Postgres.
+
+Accessory images are not digest-pinned, unlike the app's: buidl did not build them, and re-resolving a tag on every apply would turn an unrelated upstream push into a database restart. They are also never pruned — removing one from `buidl.yaml` stops managing it, and you delete the StatefulSet and its volume yourself, because buidl deleting a volume on the strength of a removed config block is not a risk worth taking.
+
 ### Lifecycle hooks
 
 Executables in `.buidl/hooks`, named for the lifecycle point. Each receives the release's identity **and every resolved secret** in its environment.
@@ -488,6 +517,7 @@ Release ID, digest and URL are also exported as CI step outputs.
 | `logs` | Stream logs from all instances |
 | `manifest` | Print the YAML buidl would apply |
 | `config show/validate/environments` | Inspect resolved configuration |
+| `accessory plan/apply` | Reconcile databases, caches and queues (never touched by `deploy`) |
 | `cluster ...` | Install and manage the cluster behind an environment (see above) |
 
 Global flags: `-e/--env`, `-f/--config`, `-o/--output {auto,pretty,plain,json}`, `-v/--verbose`, `--timeout`.
@@ -534,16 +564,16 @@ The Kubernetes deploy backend and the k3s/RKE2 cluster installer are implemented
 
 **Verified on a three-control-plane cluster** (three Vultr servers): control planes joined strictly one at a time — 55s, 42s, 29s — forming a real three-member etcd quorum that tolerates one failure. `buidl promote` then shipped a **byte-identical digest** from staging to production in 12 seconds with no rebuild, carrying the source release's git provenance rather than the local working tree's.
 
-**Not yet verified:** RKE2 (only k3s has been installed for real), version upgrades against a running cluster, `cluster reset`, blue-green cutover, accessories (modeled in config but **not implemented**), and multi-arch builds.
+**Not yet verified:** RKE2 (only k3s has been installed for real), version upgrades against a running cluster, `cluster reset`, blue-green cutover, accessories (implemented and unit-tested, but never applied to a real cluster), and multi-arch builds.
 
 ### Honest caveats
 
-- **`accessories` does nothing.** It parses and validates, but no accessory is ever reconciled. Do not rely on it.
+- **Accessories have never run against a real cluster.** They render, plan and apply, and the rendering is round-tripped through the real Kubernetes typed scheme, but no accessory has been started on real infrastructure. Treat the first one as an experiment.
 - **The binary downloads do not work yet** — the release workflow is written but no tag has been pushed through it, so nothing is published. `go install` and building from source both work. The CI workflow `buidl init` generates curls that same missing URL.
 - Coverage is ~39%, concentrated in pure logic. Cluster and registry I/O are covered by the acceptance suite instead.
 - Real-world testing found ~25 bugs across three environments, several of which no amount of unit testing would have caught (a use-after-close on a cached SSH connection, an image `USER` that Kubernetes refuses to verify, a rollback losing a write race to the Deployment controller). Treat unexercised paths with suspicion.
 
-Not implemented: only `infra.provider: static` is wired up — the `inventory.Provider` interface exists so providers that read `tofu output -json`, an Ansible inventory, or an arbitrary script slot in without touching the cluster code, but today you paste addresses into `buidl.yaml`. Accessories are modeled in config but not reconciled (deliberately separate, so an app rollout can never restart your database). `deploy.target` values other than `kubernetes`.
+Not implemented: only `infra.provider: static` is wired up — the `inventory.Provider` interface exists so providers that read `tofu output -json`, an Ansible inventory, or an arbitrary script slot in without touching the cluster code, but today you paste addresses into `buidl.yaml`. `deploy.target` values other than `kubernetes`. Accessories are never pruned: removing one from `buidl.yaml` stops managing it, and you delete the StatefulSet and its volume yourself.
 
 Known limitation: a version `upgrade` re-runs the installer in place and restarts the unit, one control plane at a time. It does **not** cordon and drain nodes first, so pods are restarted rather than gracefully evicted. For a production upgrade, drain each node yourself or accept the restart.
 

@@ -92,6 +92,29 @@ func New(cfg *config.Config, log deploy.Logger) (*Target, error) {
 	return t, nil
 }
 
+// NewRenderer builds a Target that can render manifests but cannot talk to a
+// cluster.
+//
+// Rendering is pure — it reads the config and the release and touches no API
+// server — so `buidl manifest | kubectl apply -f -`, whose whole point is not
+// needing cluster access, must work on a machine with no kubeconfig. Making
+// that an explicit constructor rather than a hand-built struct literal means
+// the "no client needed" contract is stated here, next to the fields, instead
+// of being an assumption the CLI silently depends on.
+//
+// Every client field is nil. Calling anything that reaches the API server on
+// the result will panic, which is the correct outcome: it is a programming
+// error, not a condition to handle at runtime.
+func NewRenderer(cfg *config.Config, log deploy.Logger) *Target {
+	ns := cfg.Deploy.Kubernetes.Namespace
+	if ns == "" {
+		// buildClients applies the same fallback for a connected Target; without
+		// it a rendered manifest would carry an empty namespace.
+		ns = "default"
+	}
+	return &Target{cfg: cfg, log: log, Namespace: ns}
+}
+
 // Name implements deploy.Target.
 func (t *Target) Name() string { return "kubernetes" }
 
