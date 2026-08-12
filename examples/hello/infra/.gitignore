@@ -1,0 +1,6 @@
+# OpenTofu state contains resource metadata and should not be committed here.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars

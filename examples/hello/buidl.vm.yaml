@@ -1,0 +1,87 @@
+# Cluster-install test against local VMs.
+#
+# This exercises the path buidl.yaml's `local` environment cannot: taking bare
+# Linux machines and turning them into a Kubernetes cluster over SSH.
+#
+# The machines here are OrbStack Linux VMs, but nothing about the config is
+# specific to them — the same file works against cloud servers by changing the
+# addresses. Provision them however you like, then:
+#
+#   buidl plan   -e vm -f buidl.vm.yaml    inspect the servers, show what's needed
+#   buidl deploy -e vm -f buidl.vm.yaml    install k3s, join the worker, deploy
+version: 1
+
+app: hello
+image: ghcr.io/danecwalker/buidl-hello
+
+registry:
+  createPullSecret: true
+
+build:
+  driver: buildkit
+  dockerfile: Dockerfile
+  platforms: [linux/arm64]
+
+deploy:
+  target: kubernetes
+  port: 8080
+  replicas: 2
+
+  healthcheck:
+    path: /up
+
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+  strategy:
+    type: rolling
+    maxUnavailable: "0"
+    maxSurge: 50%
+
+  deployTimeout: 120s
+  drainTimeout: 10s
+
+env:
+  clear:
+    LOG_LEVEL: info
+    GREETING: hello
+    FAIL_READINESS: ${FAIL_READINESS:-0}
+    CRASH_ON_BOOT: ${CRASH_ON_BOOT:-0}
+    BOOT_DELAY: ${BOOT_DELAY:-0}
+  secret: [DEMO_SECRET]
+
+infra:
+  ssh:
+    user: root
+    # These are throwaway local VMs whose keys were just scanned into
+    # known_hosts. Left at the default (false) deliberately, so this config also
+    # exercises the strict host-key path a real server would need.
+    acceptNewHostKeys: false
+
+  kubernetes:
+    distribution: k3s
+    # Pinned: an unpinned cluster installs whatever is current, so two runs weeks
+    # apart would not be the same cluster.
+    version: v1.33.5+k3s1
+    # Single control plane, so no controlPlaneEndpoint is required — nodes
+    # register directly with the bootstrap machine.
+    disable: [traefik]
+
+  addons:
+    # cert-manager and metrics-server need real DNS and more memory than these
+    # VMs have; the point here is the install and join path.
+    buildkit: false
+    certManager: false
+    metricsServer: false
+
+  servers:
+    - {host: 192.168.139.56, role: control-plane}
+    - {host: 192.168.139.158, role: worker, labels: {pool: apps}}
+
+environments:
+  vm:
+    deploy:
+      kubernetes:
+        namespace: buidl-hello
+        createNamespace: true

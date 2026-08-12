@@ -1,0 +1,70 @@
+# Example configuration for the acceptance harness in test/acceptance.
+#
+# There is one deployable environment, `local`, targeting a single-node cluster on
+# this machine. The app's failure switches are interpolated with safe defaults, so
+# a misbehaving release is deployed by setting a variable rather than by declaring
+# a separate environment:
+#
+#   buidl deploy -e local                              a healthy release
+#   FAIL_READINESS=1 buidl deploy -e local --auto-rollback
+#   CRASH_ON_BOOT=1  buidl deploy -e local
+#   BOOT_DELAY=25s   buidl deploy -e local
+#
+# That is deliberately the realistic shape of the test: a bad release replacing a
+# good one in the same environment, which is what actually happens in production.
+# Separate environments would each get their own namespace and never exercise the
+# replacement path.
+version: 1
+
+app: hello
+image: ghcr.io/danecwalker/buidl-hello
+
+registry:
+  # The package is private, so the cluster needs its own credential to pull it.
+  # buidl copies one from the same local Docker config it pushes with.
+  createPullSecret: true
+
+build:
+  driver: buildkit
+  dockerfile: Dockerfile
+  # Match the host so the image runs on this machine's cluster without emulation.
+  platforms: [linux/arm64]
+
+deploy:
+  target: kubernetes
+  port: 8080
+  replicas: 2
+
+  healthcheck:
+    path: /up
+
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+  strategy:
+    type: rolling
+    maxUnavailable: "0"
+    maxSurge: 50%
+
+  # Short timeouts keep the failure cases fast: a deliberately unready release
+  # should be reported in about a minute, not after the 5m default.
+  deployTimeout: 75s
+  drainTimeout: 10s
+
+env:
+  clear:
+    LOG_LEVEL: info
+    GREETING: hello
+    # Failure switches, off unless set in the environment.
+    FAIL_READINESS: ${FAIL_READINESS:-0}
+    CRASH_ON_BOOT: ${CRASH_ON_BOOT:-0}
+    BOOT_DELAY: ${BOOT_DELAY:-0}
+  secret: [DEMO_SECRET]
+
+environments:
+  local:
+    deploy:
+      kubernetes:
+        namespace: buidl-hello
+        createNamespace: true

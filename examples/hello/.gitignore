@@ -1,0 +1,6 @@
+
+# buidl local secrets
+.buidl/secrets
+
+# buidl local secret values (secrets-common is committed on purpose)
+.buidl/secrets.*

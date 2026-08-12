@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# buidl pre-deploy hook — runs after preflight, before anything is applied — run migrations here.
+#
+# Make it executable to enable it:
+#   chmod +x .buidl/hooks/pre-deploy
+#
+# Available in the environment:
+#   BUIDL_APP BUIDL_ENV BUIDL_RELEASE BUIDL_DIGEST BUIDL_IMAGE
+#   BUIDL_NAMESPACE BUIDL_GIT_SHA BUIDL_GIT_BRANCH BUIDL_ACTOR BUIDL_URL
+# plus every secret listed under env.secret in buidl.yaml.
+#
+# Exiting non-zero ABORTS the deploy.
+
+set -euo pipefail
+
+echo "would migrate $BUIDL_APP ($BUIDL_ENV) to release $BUIDL_RELEASE"
+
+# Run migrations here, before the new release serves traffic. Use a credential
+# the application itself does not get, so the app cannot alter its own schema:
+#
+#   migrate -database "$MIGRATIONS_DATABASE_URL" -path ./migrations up

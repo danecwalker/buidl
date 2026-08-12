@@ -1,0 +1,25 @@
+# Build output
+bin/
+dist/
+coverage.out
+
+# Secret VALUES only. `.buidl/secrets-common` is deliberately NOT ignored: it
+# holds indirections ($VAR references) rather than values, and committing it is
+# what makes the set of required secrets reviewable.
+.buidl/secrets
+.buidl/secrets.*
+
+# OpenTofu / Terraform. State contains resource metadata and, depending on the
+# provider, sensitive values; tfvars routinely holds credentials.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+
+# Machine-local dev config, never deployed.
+.env.local
+.env.*.local
+
+.DS_Store

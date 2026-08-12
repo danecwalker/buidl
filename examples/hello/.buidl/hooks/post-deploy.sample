@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# buidl post-deploy hook — runs after the release is healthy and serving.
+#
+# Make it executable to enable it:
+#   chmod +x .buidl/hooks/post-deploy
+#
+# Available in the environment:
+#   BUIDL_APP BUIDL_ENV BUIDL_RELEASE BUIDL_DIGEST BUIDL_IMAGE
+#   BUIDL_NAMESPACE BUIDL_GIT_SHA BUIDL_GIT_BRANCH BUIDL_ACTOR BUIDL_URL
+# plus every secret listed under env.secret in buidl.yaml.
+#
+# Exiting non-zero is reported but does not fail the deploy.
+
+set -euo pipefail
+
+echo "deployed $BUIDL_APP ($BUIDL_ENV) release $BUIDL_RELEASE"
+
+# Notify, warm a cache, or purge a CDN here.
+#
+#   curl -fsS -X POST "$SLACK_WEBHOOK" \
+#     -d "{\"text\":\"deployed $BUIDL_APP $BUIDL_RELEASE to $BUIDL_ENV\"}"

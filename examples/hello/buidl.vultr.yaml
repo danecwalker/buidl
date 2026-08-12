@@ -1,0 +1,105 @@
+# Cloud deployment: a single Vultr server, public DNS, and real TLS.
+#
+# This is the configuration the local VM test could not exercise. It adds the
+# three things that only work with a public address:
+#
+#   - an Ingress on a real hostname
+#   - cert-manager issuing a Let's Encrypt certificate
+#   - a public/private address split (privateIP pins intra-cluster traffic)
+#
+# Provision first, then deploy:
+#
+#   cd infra && tofu apply && tofu output -raw ipv4
+#   # point an A record at that address and wait for it to resolve
+#   buidl deploy -e vultr -f buidl.vultr.yaml
+version: 1
+
+app: hello
+image: ghcr.io/danecwalker/buidl-hello
+
+registry:
+  createPullSecret: true
+
+build:
+  driver: buildkit
+  dockerfile: Dockerfile
+  # Vultr's vc2 instances are x86_64, unlike the arm64 machines used locally.
+  # Getting this wrong produces an exec format error at container start, not a
+  # build failure, so it is worth stating explicitly.
+  platforms: [linux/amd64]
+
+deploy:
+  target: kubernetes
+  port: 8080
+  # One replica: a single-node cluster with 2GB has to fit k3s, Traefik,
+  # cert-manager and the app.
+  replicas: 1
+
+  healthcheck:
+    path: /up
+
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+  strategy:
+    type: rolling
+    # With one replica on one node, surging is what keeps the rollout
+    # zero-downtime: the new pod must be ready before the old one goes.
+    maxUnavailable: "0"
+    maxSurge: 1
+
+  deployTimeout: 180s
+  drainTimeout: 10s
+
+env:
+  clear:
+    LOG_LEVEL: info
+    GREETING: hello
+    FAIL_READINESS: ${FAIL_READINESS:-0}
+    CRASH_ON_BOOT: ${CRASH_ON_BOOT:-0}
+    BOOT_DELAY: ${BOOT_DELAY:-0}
+  secret: [DEMO_SECRET]
+
+proxy:
+  host: hello.danecwalker.com
+  ssl: true
+
+infra:
+  ssh:
+    user: root
+    # A freshly created cloud server has a host key nobody has seen before, so
+    # strict checking would fail on the first connect. Trust-on-first-use is the
+    # pragmatic choice here; a mismatched key is still a hard failure.
+    acceptNewHostKeys: true
+
+  kubernetes:
+    distribution: k3s
+    version: v1.33.5+k3s1
+    # Traefik stays enabled: it is the ingress controller that serves the
+    # hostname above and answers the ACME http-01 challenge.
+    #
+    # No controlPlaneEndpoint is needed with one control plane — nodes and
+    # kubeconfigs address the server directly.
+
+  addons:
+    # cert-manager issues the certificate for proxy.ssl. The ClusterIssuer buidl
+    # creates uses this address for ACME registration and expiry notices.
+    certManager: true
+    certManagerEmail: dcw6205@gmail.com
+    # metrics-server is bundled with k3s; the in-cluster builder is unnecessary
+    # since images are built locally and pulled from ghcr.io.
+    metricsServer: false
+    buildkit: false
+
+  servers:
+    # From: tofu output -raw ipv4
+    - host: 149.28.175.214
+      role: control-plane
+
+environments:
+  vultr:
+    deploy:
+      kubernetes:
+        namespace: buidl-hello
+        createNamespace: true

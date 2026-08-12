@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stands in for a migration: proves the hook receives release identity and secrets.
+set -euo pipefail
+echo "pre-deploy: app=$BUIDL_APP env=$BUIDL_ENV release=$BUIDL_RELEASE ns=$BUIDL_NAMESPACE"
+echo "pre-deploy: digest=$BUIDL_DIGEST"
+echo "pre-deploy: DEMO_SECRET is ${#DEMO_SECRET} chars (value not printed)"
