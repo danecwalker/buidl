@@ -300,18 +300,18 @@ workflow, or to hand it to another tool:
 				rel.Digest = placeholderDigest
 			}
 
-			target, err := a.target()
-			if err != nil {
-				return err
-			}
-			defer target.Close()
-
-			k8s, ok := target.(*kubernetes.Target)
-			if !ok {
+			if a.cfg.Deploy.Target != "kubernetes" {
 				return fmt.Errorf("`manifest` is only supported for the kubernetes target")
 			}
 
-			out, err := k8s.ManifestYAML(a.deployRequest(rel, secretValues, false, false))
+			// Rendering is pure: it reads the config and the release and touches no
+			// API server. Constructing a real target here would load a kubeconfig and
+			// build clients, so the documented GitOps use — `buidl manifest -e
+			// production | kubectl apply -f -`, whose whole point is not needing
+			// cluster access — failed on any machine without one.
+			renderer := &kubernetes.Target{Namespace: a.cfg.Deploy.Kubernetes.Namespace}
+
+			out, err := renderer.ManifestYAML(a.deployRequest(rel, secretValues, false, false))
 			if err != nil {
 				return err
 			}

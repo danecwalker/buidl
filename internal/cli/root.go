@@ -305,16 +305,61 @@ func shortSHA(sha string) string {
 // the current context, which is at best a different cluster and at worst a stale
 // entry for one that no longer exists.
 //
-// The context is only adopted if it exists locally. On a fresh fleet it will not
-// yet, and `deploy` fetches it as part of bringing the cluster up.
+// When the managed context is not present locally the command fails rather than
+// falling back to the kubeconfig's current context — see managedContext.
 func (a *App) target() (deploy.Target, error) {
-	if a.cfg.Infra != nil && a.cfg.Deploy.Kubernetes.Context == "" {
-		if name := a.defaultContextName(); cluster.ContextExists(name) {
-			a.cfg.Deploy.Kubernetes.Context = name
-			a.log.Detail("targeting managed cluster context %s", name)
-		}
+	name, err := a.managedContext()
+	if err != nil {
+		return nil, err
+	}
+	if name != "" {
+		a.cfg.Deploy.Kubernetes.Context = name
+		a.log.Detail("targeting managed cluster context %s", name)
 	}
 	return deploy.For(a.cfg, a.log)
+}
+
+// managedContext resolves the kubeconfig context for a buidl-managed cluster.
+//
+// It returns "" when there is nothing to resolve: no infra block, or a context
+// pinned in buidl.yaml, which is already the guardrail.
+//
+// When the context is missing this is a hard error, deliberately, rather than
+// letting the caller fall through to the kubeconfig's current context. That
+// fall-through is the worst failure mode buidl has: on a machine that never ran
+// deploy, `buidl status -e production` would query whatever is current —
+// docker-desktop, a colleague's cluster — and report "not deployed to
+// production" during an incident, which is the most alarming possible wrong
+// answer.
+//
+// Fetching the credentials automatically was the alternative. It is what deploy
+// and promote do (see ensureClusterCredentials), because they are already
+// changing the cluster and hold the cobra command needed to run it. A read
+// command is different: SSHing into the fleet and rewriting ~/.kube/config as a
+// side effect of `status` is a surprise, it needs SSH access the reader may not
+// have, and it can block on a host-key prompt at the worst moment. Saying which
+// command to run is faster and never wrong.
+func (a *App) managedContext() (string, error) {
+	if a.cfg.Infra == nil || a.cfg.Deploy.Kubernetes.Context != "" {
+		return "", nil
+	}
+
+	name := a.defaultContextName()
+	if cluster.ContextExists(name) {
+		return name, nil
+	}
+	return "", fmt.Errorf("no local credentials for the %s cluster (kubeconfig context %q not found)\n\n"+
+		"hint: fetch them with `buidl cluster kubeconfig%s`, or run `buidl deploy%s`, which fetches them while converging the cluster",
+		a.cfg.Environment, name, a.environmentFlag(), a.environmentFlag())
+}
+
+// environmentFlag renders the -e flag for a hint, or nothing when the config has
+// a single environment and the flag would be noise.
+func (a *App) environmentFlag() string {
+	if a.cfg.Environment == "" || a.cfg.Environment == "default" {
+		return ""
+	}
+	return " -e " + a.cfg.Environment
 }
 
 // context returns a command context that cancels on SIGINT/SIGTERM and after the

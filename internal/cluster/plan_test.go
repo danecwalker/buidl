@@ -124,6 +124,75 @@ func TestEmptyPlanIsActionable(t *testing.T) {
 	}
 }
 
+// TestPendingAddonsAreReportedAsChanges guards the case that made `plan` claim a
+// cluster matched its configuration while a configured addon had never been
+// installed — after which `deploy` performed a multi-minute cluster-wide CRD
+// install unannounced, and `plan --detailed-exitcode` exited 0.
+func TestPendingAddons(t *testing.T) {
+	tests := []struct {
+		name    string
+		addons  []AddonPlan
+		pending []string
+	}{
+		{
+			name:    "no addons configured",
+			addons:  nil,
+			pending: nil,
+		},
+		{
+			name: "every addon already installed",
+			addons: []AddonPlan{
+				{Addon: Addon{Name: "cert-manager"}, Installed: true},
+				{Addon: Addon{Name: "buildkit"}, Installed: true},
+			},
+			pending: nil,
+		},
+		{
+			name: "one addon missing on an otherwise up-to-date cluster",
+			addons: []AddonPlan{
+				{Addon: Addon{Name: "cert-manager"}},
+				{Addon: Addon{Name: "buildkit"}, Installed: true},
+			},
+			pending: []string{"cert-manager"},
+		},
+		{
+			// A cluster that does not exist yet has none of them.
+			name: "fresh cluster",
+			addons: []AddonPlan{
+				{Addon: Addon{Name: "cert-manager"}},
+				{Addon: Addon{Name: "metrics-server"}},
+			},
+			pending: []string{"cert-manager", "metrics-server"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Nodes are deliberately up to date: the whole point is that server-level
+			// convergence says nothing about addons.
+			plan := &Plan{
+				Nodes:  []NodePlan{{Server: inventory.Server{Host: "a"}, Action: ActionUpToDate}},
+				Addons: tt.addons,
+			}
+
+			got := plan.PendingAddons()
+			if len(got) != len(tt.pending) {
+				t.Fatalf("PendingAddons = %d entries, want %d", len(got), len(tt.pending))
+			}
+			for i, want := range tt.pending {
+				if got[i].Addon.Name != want {
+					t.Errorf("PendingAddons[%d] = %q, want %q", i, got[i].Addon.Name, want)
+				}
+			}
+			// Server-level accounting must stay unchanged, or deploy would prompt to
+			// install Kubernetes on zero servers.
+			if plan.HasChanges() {
+				t.Error("a pending addon must not register as a server change")
+			}
+		})
+	}
+}
+
 func TestVerbForAction(t *testing.T) {
 	if got := verbFor(ActionUpgrade); got != "Upgrading" {
 		t.Errorf("verbFor(upgrade) = %q", got)

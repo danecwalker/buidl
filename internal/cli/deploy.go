@@ -299,7 +299,7 @@ func (a *App) confirmProduction(cmd *cobra.Command, yes bool) error {
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "About to deploy %s to %s (cluster: %s).\nContinue? [y/N] ",
-		a.cfg.App, a.cfg.Environment, a.cfg.Deploy.Kubernetes.Context)
+		a.cfg.App, a.cfg.Environment, a.clusterDescription())
 
 	var answer string
 	// A read error means no usable stdin, which is the same as declining.
@@ -312,6 +312,27 @@ func (a *App) confirmProduction(cmd *cobra.Command, yes bool) error {
 	default:
 		return fmt.Errorf("deploy cancelled")
 	}
+}
+
+// clusterDescription names the cluster a command is about to change.
+//
+// The confirmation prompt exists to answer one question — which cluster is this
+// about to touch — and the config's context field is still empty when it runs on
+// a deploy, because convergence sets that later. Printing it directly produced
+// "(cluster: )" from the one prompt whose entire job is to say. So fall back to
+// the context buidl manages for this environment, and then to whatever the
+// kubeconfig currently selects, which is what the deploy would in fact use.
+func (a *App) clusterDescription() string {
+	if name := a.cfg.Deploy.Kubernetes.Context; name != "" {
+		return name
+	}
+	if a.cfg.Infra != nil {
+		return a.defaultContextName()
+	}
+	if current := cluster.CurrentContext(); current != "" {
+		return current + " (current kubeconfig context)"
+	}
+	return "unknown"
 }
 
 // isProductionLike recognizes the environment names that warrant a confirmation.
@@ -358,6 +379,7 @@ cluster work alone.`,
 			// Cluster first: if it does not exist, the app plan cannot be computed
 			// and saying so is more useful than a connection error.
 			clusterChangesPending := false
+			addonsPending := false
 			if mgr, clusterPlan, err := a.clusterPlan(ctx); err != nil {
 				return err
 			} else if mgr != nil {
@@ -368,11 +390,17 @@ cluster work alone.`,
 					return errClusterUnknown()
 				}
 				clusterChangesPending = clusterPlan.HasChanges()
+				// Tracked apart from the server changes above: a missing addon does
+				// not mean the cluster is absent, so it must not trigger the "the
+				// application plan will be available once the cluster exists"
+				// fallbacks — but it is still a change a deploy would make, so it
+				// belongs in the exit code.
+				addonsPending = len(clusterPlan.PendingAddons()) > 0
 
 				// Only target the managed cluster once we know this machine holds
-				// its credentials. Writing the field unconditionally also bypasses
-				// the identical guard in target(), so plan would fail on a fresh
-				// machine or CI runner against a perfectly healthy cluster.
+				// its credentials. Writing the field unconditionally would pin a
+				// context that does not exist locally, hiding the missing-credentials
+				// error target() raises — the one that names the command to fix it.
 				if !clusterChangesPending && a.cfg.Deploy.Kubernetes.Context == "" {
 					if name := a.defaultContextName(); cluster.ContextExists(name) {
 						a.cfg.Deploy.Kubernetes.Context = name
@@ -438,7 +466,7 @@ cluster work alone.`,
 			// Terraform-style: exit 2 signals "there are changes", which lets a
 			// pipeline require an approval step only when something would change.
 			// Cluster changes count too — they are part of what a deploy would do.
-			if detailedExitCode && (plan.HasChanges() || clusterChangesPending) {
+			if detailedExitCode && (plan.HasChanges() || clusterChangesPending || addonsPending) {
 				return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
 			}
 			return nil
@@ -489,6 +517,12 @@ Example:
 			if from == to {
 				return fmt.Errorf("--from and --to must differ")
 			}
+			// -e is overwritten below by --from and then --to, so accepting it would
+			// let `promote -e staging --from a --to b` read as though it had anything
+			// to do with staging.
+			if a.opts.environment != "" {
+				return fmt.Errorf("`promote` selects environments with --from and --to; drop -e/--env")
+			}
 
 			// Read the source environment's live state.
 			a.opts.environment = from
@@ -517,11 +551,16 @@ Example:
 				return fmt.Errorf("%s has no recorded image digest; redeploy it with this version of buidl first", from)
 			}
 			a.log.Info("%s is running %s (%s)", from, status.Release, shortDigest(status.Digest))
+			sourceImage := a.cfg.Image
 
 			// Reload config for the destination environment.
 			a.cfg = nil
 			a.opts.environment = to
 			if err := a.requireConfig(ctx); err != nil {
+				return err
+			}
+
+			if err := checkPromoteRepositories(from, sourceImage, to, a.cfg.Image); err != nil {
 				return err
 			}
 
@@ -602,6 +641,23 @@ Example:
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the production confirmation prompt")
 
 	return cmd
+}
+
+// checkPromoteRepositories refuses a promotion whose digest and repository come
+// from different environments.
+//
+// A digest identifies bytes within one repository, so pairing the source's digest
+// with a destination that overlays a different `image` names a reference that does
+// not exist. Preflight does catch it, as "image ... is not available", which reads
+// like a registry outage and sends the user looking in the wrong place.
+func checkPromoteRepositories(from, sourceImage, to, destImage string) error {
+	if sourceImage == destImage {
+		return nil
+	}
+	return fmt.Errorf("promote cannot cross repositories: %s builds to %s but %s builds to %s\n\n"+
+		"hint: a digest exists only in the repository it was pushed to, so %s's image has no counterpart in %s.\n"+
+		"Give both environments the same `image`, or build for %s with `buidl deploy -e %s`.",
+		from, sourceImage, to, destImage, from, destImage, to, to)
 }
 
 // newRollbackCmd reverts to a previous release.

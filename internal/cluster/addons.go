@@ -39,6 +39,14 @@ type Addon struct {
 	Present string
 }
 
+// AddonPlan is one enabled addon and whether the cluster already has it.
+type AddonPlan struct {
+	Addon Addon
+	// Installed reports whether the addon's presence check succeeded. False on a
+	// cluster that is not running yet, where nothing can be installed.
+	Installed bool
+}
+
 // Addons returns the enabled addons in dependency order.
 func (m *Manager) Addons() []Addon {
 	var out []Addon
@@ -104,12 +112,9 @@ func (m *Manager) ApplyAddons(ctx context.Context) error {
 	kubectl := m.distro.KubectlCommand()
 
 	for _, addon := range addons {
-		if addon.Present != "" {
-			check := strings.ReplaceAll(addon.Present, kubectlPlaceholder, kubectl)
-			if res, err := client.TrySudo(ctx, check+" >/dev/null 2>&1"); err == nil && res.ExitCode == 0 {
-				m.log.Detail("%s is already installed", addon.Name)
-				continue
-			}
+		if addonPresent(ctx, client, kubectl, addon) {
+			m.log.Detail("%s is already installed", addon.Name)
+			continue
 		}
 
 		m.log.Step("Installing " + addon.Name)
@@ -139,6 +144,52 @@ func (m *Manager) ApplyAddons(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// addonPresent runs an addon's presence check on a control-plane node.
+//
+// Shared by planning and installation on purpose: if `plan` decided presence by
+// any other rule than the one `deploy` acts on, the plan would be a guess about a
+// different question.
+func addonPresent(ctx context.Context, client *remote.Client, kubectl string, addon Addon) bool {
+	if addon.Present == "" {
+		return false
+	}
+	check := strings.ReplaceAll(addon.Present, kubectlPlaceholder, kubectl)
+	res, err := client.TrySudo(ctx, check+" >/dev/null 2>&1")
+	return err == nil && res.ExitCode == 0
+}
+
+// planAddons records which enabled addons the cluster is still missing.
+//
+// Without this the presence check lives only on the deploy path, so `plan`
+// reports "no changes" on a cluster where a configured addon was never installed
+// and then `deploy` performs an unannounced cluster-wide CRD install — and
+// `plan --detailed-exitcode` exits 0, waving through a pipeline that gates
+// approval on it.
+func (m *Manager) planAddons(ctx context.Context, plan *Plan) {
+	addons := m.Addons()
+	if len(addons) == 0 {
+		return
+	}
+
+	// Presence can only be asked of a running cluster. Where there is none every
+	// addon is pending, which is exactly right: bootstrap installs them all.
+	var client *remote.Client
+	if plan.BootstrapExists {
+		if c, err := m.connect(ctx, plan.Bootstrap); err == nil {
+			client = c
+		}
+	}
+
+	kubectl := m.distro.KubectlCommand()
+	for _, addon := range addons {
+		entry := AddonPlan{Addon: addon}
+		if client != nil {
+			entry.Installed = addonPresent(ctx, client, kubectl, addon)
+		}
+		plan.Addons = append(plan.Addons, entry)
+	}
 }
 
 // applyWithRetry applies a manifest, tolerating transient CRD-discovery races.

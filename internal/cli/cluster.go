@@ -264,7 +264,7 @@ func (a *App) renderClusterPlan(plan *cluster.Plan, showConfig bool) {
 		{"distribution", plan.Distro.Name() + " " + version},
 		{"topology", plan.Inventory.Summary()},
 		{"registration", plan.RegistrationAddress},
-		{"addons", a.addonSummary()},
+		{"addons", addonPlanSummary(plan)},
 	})
 	a.log.Info("")
 
@@ -308,6 +308,7 @@ func (a *App) renderClusterPlan(plan *cluster.Plan, showConfig bool) {
 	a.log.Info("")
 
 	skipped := plan.Skipped()
+	pending := plan.PendingAddons()
 
 	// Claiming "no changes" when nothing could be inspected would be a lie, and
 	// the most dangerous kind: it reads as a healthy cluster. Callers turn this
@@ -326,9 +327,22 @@ func (a *App) renderClusterPlan(plan *cluster.Plan, showConfig bool) {
 		return
 	}
 
+	// An addon a deploy would install is a change, and a large one: cert-manager
+	// installs cluster-wide CRDs and takes minutes. Reporting it here is what stops
+	// a deploy from doing that unannounced.
+	if len(pending) > 0 {
+		names := make([]string, 0, len(pending))
+		for _, entry := range pending {
+			names = append(names, entry.Addon.Name)
+		}
+		a.log.Info("plan: %d addon(s) to install: %s", len(pending), strings.Join(names, ", "))
+	}
+
 	switch {
-	case !plan.HasChanges() && len(skipped) == 0:
+	case !plan.HasChanges() && len(skipped) == 0 && len(pending) == 0:
 		a.log.Success("no changes; the cluster matches your configuration")
+	case !plan.HasChanges() && len(skipped) == 0:
+		a.log.Info("no server changes; the addon(s) above are still to install")
 	case !plan.HasChanges():
 		a.log.Success("no changes on the %d server(s) that could be inspected", len(plan.Nodes)-len(skipped))
 		a.log.Warn("%d server(s) were skipped and remain unknown", len(skipped))
@@ -378,24 +392,22 @@ func installedVersion(node cluster.NodePlan) string {
 	return truncate(version, 20)
 }
 
-// addonSummary lists the addons that will be installed.
-func (a *App) addonSummary() string {
-	if a.cfg == nil || a.cfg.Infra == nil {
-		return ""
-	}
-	var names []string
-	addons := a.cfg.Infra.Addons
-	if addons.CertManager {
-		names = append(names, "cert-manager")
-	}
-	if addons.MetricsServer {
-		names = append(names, "metrics-server")
-	}
-	if addons.BuildKit {
-		names = append(names, "buildkit")
-	}
-	if len(names) == 0 {
+// addonPlanSummary lists each enabled addon with whether the cluster has it.
+//
+// The state belongs on this line: a bare list of names reads as a description of
+// the cluster, so a header saying `addons cert-manager` next to "no changes" was
+// claiming an addon was in place that had never been installed.
+func addonPlanSummary(plan *cluster.Plan) string {
+	if len(plan.Addons) == 0 {
 		return "none"
+	}
+	names := make([]string, 0, len(plan.Addons))
+	for _, entry := range plan.Addons {
+		state := "pending"
+		if entry.Installed {
+			state = "installed"
+		}
+		names = append(names, entry.Addon.Name+" ("+state+")")
 	}
 	return strings.Join(names, ", ")
 }

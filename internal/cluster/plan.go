@@ -101,8 +101,24 @@ type Plan struct {
 	// cluster already exists, supplied by config, or generated.
 	Token string
 
-	Nodes    []NodePlan
+	Nodes []NodePlan
+	// Addons is the planned state of every enabled addon. Installing one is part
+	// of what a deploy does — cert-manager alone means cluster-wide CRDs and
+	// several minutes — so a plan that only covered servers would understate the
+	// change on a cluster whose nodes are already up to date.
+	Addons   []AddonPlan
 	Warnings []string
+}
+
+// PendingAddons returns the enabled addons that are not installed yet.
+func (p *Plan) PendingAddons() []AddonPlan {
+	var out []AddonPlan
+	for _, a := range p.Addons {
+		if !a.Installed {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Changes returns the nodes that need work.
@@ -352,6 +368,8 @@ func (m *Manager) Plan(ctx context.Context) (*Plan, error) {
 
 		plan.Nodes = append(plan.Nodes, node)
 	}
+
+	m.planAddons(ctx, plan)
 
 	// An active host firewall is reported per machine. It does not block the
 	// install — which is exactly why it needs saying: everything succeeds and the

@@ -188,6 +188,102 @@ func TestMergeOverwritesSameNamedContext(t *testing.T) {
 	}
 }
 
+// TestContextExistsUsesTheMergedKubeconfig guards the mismatch that made buidl
+// re-fetch credentials forever: the deploy client loads every KUBECONFIG entry
+// merged, so a check that reads only the first file declares a context missing
+// that the client can see, and the managed context is never adopted.
+func TestContextExistsUsesTheMergedKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+
+	first := filepath.Join(dir, "config")
+	other := clientcmdapi.NewConfig()
+	other.Contexts["docker-desktop"] = &clientcmdapi.Context{Cluster: "docker-desktop", AuthInfo: "docker-desktop"}
+	other.CurrentContext = "docker-desktop"
+	if err := clientcmd.WriteToFile(*other, first); err != nil {
+		t.Fatal(err)
+	}
+
+	second := filepath.Join(dir, "prod.yaml")
+	managed := fetchedConfig("https://10.0.0.1:6443")
+	renameContext(managed, "api-production")
+	if err := clientcmd.WriteToFile(*managed, second); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+		context    string
+		want       bool
+	}{
+		{
+			name:       "context in the first entry",
+			kubeconfig: first + string(os.PathListSeparator) + second,
+			context:    "docker-desktop",
+			want:       true,
+		},
+		{
+			// The regression: the managed context lives in a later entry, which the
+			// client merges and buidl used to ignore.
+			name:       "context in a later entry",
+			kubeconfig: first + string(os.PathListSeparator) + second,
+			context:    "api-production",
+			want:       true,
+		},
+		{
+			name:       "context in no entry",
+			kubeconfig: first + string(os.PathListSeparator) + second,
+			context:    "api-staging",
+			want:       false,
+		},
+		{
+			// A missing file must not make the entries after it unreadable, or one
+			// stale KUBECONFIG entry would hide every real credential.
+			name:       "missing entry does not hide the rest",
+			kubeconfig: filepath.Join(dir, "absent.yaml") + string(os.PathListSeparator) + second,
+			context:    "api-production",
+			want:       true,
+		},
+		{
+			name:       "empty name is never present",
+			kubeconfig: second,
+			context:    "",
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KUBECONFIG", tt.kubeconfig)
+			if got := ContextExists(tt.context); got != tt.want {
+				t.Errorf("ContextExists(%q) = %v, want %v", tt.context, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCurrentContextReadsTheMergedKubeconfig covers the value a confirmation
+// prompt shows when no context is pinned: naming the wrong cluster there is the
+// same as naming none.
+func TestCurrentContextReadsTheMergedKubeconfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	cfg := fetchedConfig("https://10.0.0.1:6443")
+	renameContext(cfg, "api-production")
+	if err := clientcmd.WriteToFile(*cfg, path); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("KUBECONFIG", path)
+	if got := CurrentContext(); got != "api-production" {
+		t.Errorf("CurrentContext = %q, want api-production", got)
+	}
+
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	if got := CurrentContext(); got != "" {
+		t.Errorf("CurrentContext with no kubeconfig = %q, want empty", got)
+	}
+}
+
 func keysOfClusters(cfg *clientcmdapi.Config) []string {
 	out := make([]string, 0, len(cfg.Clusters))
 	for k := range cfg.Clusters {

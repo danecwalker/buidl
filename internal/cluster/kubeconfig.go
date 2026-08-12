@@ -151,28 +151,41 @@ func MergeKubeconfig(fetched *clientcmdapi.Config, path string, setCurrent bool)
 // being up to date says nothing about whether *this* machine can reach it: a CI
 // runner starts with no kubeconfig at all, and a run that failed after installing
 // leaves the cluster healthy but the credentials unfetched.
+// The answer must come from the same merged view the deploy client builds from.
+// The client uses NewDefaultClientConfigLoadingRules, which merges every entry in
+// KUBECONFIG; reading only the first file makes a context living in a later entry
+// invisible, so buidl re-fetches credentials on every run and never adopts the
+// context it already has.
 func ContextExists(name string) bool {
 	if name == "" {
 		return false
 	}
 
-	path := ""
-	if env := os.Getenv("KUBECONFIG"); env != "" {
-		path = filepath.SplitList(env)[0]
-	} else {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return false
-		}
-		path = filepath.Join(home, ".kube", "config")
-	}
-
-	cfg, err := clientcmd.LoadFromFile(path)
+	cfg, err := localKubeconfig()
 	if err != nil {
 		return false
 	}
 	_, ok := cfg.Contexts[name]
 	return ok
+}
+
+// CurrentContext reports the context the local kubeconfig selects, or "" when
+// there is none.
+//
+// Used where buidl must name the cluster it is about to address without an
+// explicit context configured — a prompt that cannot say which cluster it means
+// is worse than no prompt.
+func CurrentContext() string {
+	cfg, err := localKubeconfig()
+	if err != nil {
+		return ""
+	}
+	return cfg.CurrentContext
+}
+
+// localKubeconfig loads the merged kubeconfig exactly as the deploy client does.
+func localKubeconfig() (*clientcmdapi.Config, error) {
+	return clientcmd.NewDefaultClientConfigLoadingRules().Load()
 }
 
 // NodeStatus is one node as the cluster reports it.
