@@ -492,7 +492,16 @@ The Kubernetes deploy backend and the k3s/RKE2 cluster installer are implemented
 
 **Verified without a cluster:** configuration resolution, manifest rendering (round-tripped through the real Kubernetes typed scheme), node config rendering for every role and distribution, shell-injection safety, kubeconfig merge safety, inventory validation, project detection, the diff engine, field-level change extraction (including that secret values never leak into plan output), plan and deploy report rendering, step timing and summaries, and CI output modes.
 
-**Not yet verified:** multi-control-plane HA (the one-at-a-time etcd join ordering has only been exercised with a single control plane), RKE2 (only k3s has been installed for real), version upgrades against a running cluster, `cluster reset`, blue-green cutover, accessories, multi-arch builds, and cert-manager/TLS issuance.
+**Verified on a three-control-plane cluster** (three Vultr servers): control planes joined strictly one at a time — 55s, 42s, 29s — forming a real three-member etcd quorum that tolerates one failure. `buidl promote` then shipped a **byte-identical digest** from staging to production in 12 seconds with no rebuild, carrying the source release's git provenance rather than the local working tree's.
+
+**Not yet verified:** RKE2 (only k3s has been installed for real), version upgrades against a running cluster, `cluster reset`, blue-green cutover, accessories (modeled in config but **not implemented**), and multi-arch builds.
+
+### Honest caveats
+
+- **`accessories` does nothing.** It parses and validates, but no accessory is ever reconciled. Do not rely on it.
+- **The install instructions do not work yet** — there are no published release binaries. Build from source.
+- Coverage is ~39%, concentrated in pure logic. Cluster and registry I/O are covered by the acceptance suite instead.
+- Real-world testing found ~25 bugs across three environments, several of which no amount of unit testing would have caught (a use-after-close on a cached SSH connection, an image `USER` that Kubernetes refuses to verify, a rollback losing a write race to the Deployment controller). Treat unexercised paths with suspicion.
 
 Not implemented: only `infra.provider: static` is wired up — the `inventory.Provider` interface exists so providers that read `tofu output -json`, an Ansible inventory, or an arbitrary script slot in without touching the cluster code, but today you paste addresses into `buidl.yaml`. Accessories are modeled in config but not reconciled (deliberately separate, so an app rollout can never restart your database). `deploy.target` values other than `kubernetes`.
 
