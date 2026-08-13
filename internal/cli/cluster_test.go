@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danewalker/buidl/internal/cluster"
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/inventory"
-	"github.com/danewalker/buidl/internal/ui"
+	"github.com/danecwalker/buidl/internal/cluster"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/ui"
 )
 
 // clusterPlanWithAddons builds a plan whose servers are all up to date, so the

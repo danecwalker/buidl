@@ -9,7 +9,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
-	buidlconfig "github.com/danewalker/buidl/internal/config"
+	buidlconfig "github.com/danecwalker/buidl/internal/config"
 )
 
 // Prebuilt does not build anything. It resolves an existing registry reference

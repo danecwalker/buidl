@@ -15,10 +15,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 
-	"github.com/danewalker/buidl/internal/build"
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/build"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 // Preflight validates that a deploy can succeed before mutating anything.

@@ -6,8 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
 )
 
 // parsed decodes a rendered node config so assertions read against real keys

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/gitinfo"
-	"github.com/danewalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/gitinfo"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 func TestNormalizeRemote(t *testing.T) {

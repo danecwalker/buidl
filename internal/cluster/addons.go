@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/inventory"
-	"github.com/danewalker/buidl/internal/remote"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/remote"
 )
 
 // kubectlPlaceholder is substituted with the distribution's kubectl invocation

@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/deploy/kubernetes"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/deploy/kubernetes"
 )
 
 // newStatusCmd reports what is currently live.

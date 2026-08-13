@@ -11,8 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 // Shared timeout defaults, used when config leaves them unset.

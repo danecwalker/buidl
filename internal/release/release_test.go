@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danewalker/buidl/internal/gitinfo"
+	"github.com/danecwalker/buidl/internal/gitinfo"
 )
 
 var (

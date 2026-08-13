@@ -3,7 +3,7 @@ package cluster
 import (
 	"testing"
 
-	"github.com/danewalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/inventory"
 )
 
 // TestVersionDrifted covers the check that keeps a changed `kubernetes.version`

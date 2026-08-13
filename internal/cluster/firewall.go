@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/inventory"
-	"github.com/danewalker/buidl/internal/remote"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/remote"
 )
 
 // FirewallKind identifies the host firewall in use on a machine.

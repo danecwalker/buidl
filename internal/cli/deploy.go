@@ -6,11 +6,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/danewalker/buidl/internal/build"
-	"github.com/danewalker/buidl/internal/cluster"
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/gitinfo"
-	"github.com/danewalker/buidl/internal/hooks"
+	"github.com/danecwalker/buidl/internal/build"
+	"github.com/danecwalker/buidl/internal/cluster"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/gitinfo"
+	"github.com/danecwalker/buidl/internal/hooks"
 )
 
 // newBuildCmd builds and pushes an image without deploying.

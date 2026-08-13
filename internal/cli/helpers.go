@@ -9,12 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/danewalker/buidl/internal/build"
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/hooks"
-	"github.com/danewalker/buidl/internal/release"
-	"github.com/danewalker/buidl/internal/secrets"
-	"github.com/danewalker/buidl/internal/ui"
+	"github.com/danecwalker/buidl/internal/build"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/hooks"
+	"github.com/danecwalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/secrets"
+	"github.com/danecwalker/buidl/internal/ui"
 )
 
 // secretOptions builds the resolution options for the loaded config.

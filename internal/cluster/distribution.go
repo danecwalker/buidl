@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
 )
 
 // Distro abstracts the differences between Kubernetes distributions.

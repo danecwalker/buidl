@@ -1,4 +1,4 @@
-module github.com/danewalker/buidl
+module github.com/danecwalker/buidl
 
 go 1.25.5
 

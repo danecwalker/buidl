@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 // Request carries everything a backend needs for one operation.

@@ -60,7 +60,7 @@ jobs:
 
       - name: Install buidl
         run: |
-          curl -fsSL https://github.com/danewalker/buidl/releases/latest/download/buidl-linux-amd64 -o /usr/local/bin/buidl
+          curl -fsSL https://github.com/danecwalker/buidl/releases/latest/download/buidl-linux-amd64 -o /usr/local/bin/buidl
           chmod +x /usr/local/bin/buidl
 
       - name: Configure cluster access
@@ -123,7 +123,7 @@ jobs:
 
       - name: Install buidl
         run: |
-          curl -fsSL https://github.com/danewalker/buidl/releases/latest/download/buidl-linux-amd64 -o /usr/local/bin/buidl
+          curl -fsSL https://github.com/danecwalker/buidl/releases/latest/download/buidl-linux-amd64 -o /usr/local/bin/buidl
           chmod +x /usr/local/bin/buidl
 
       - name: Configure cluster access
@@ -158,7 +158,7 @@ jobs:
 
       - name: Install buidl
         run: |
-          curl -fsSL https://github.com/danewalker/buidl/releases/latest/download/buidl-linux-amd64 -o /usr/local/bin/buidl
+          curl -fsSL https://github.com/danecwalker/buidl/releases/latest/download/buidl-linux-amd64 -o /usr/local/bin/buidl
           chmod +x /usr/local/bin/buidl
 
       - name: Configure cluster access

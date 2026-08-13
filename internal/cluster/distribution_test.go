@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
 )
 
 func TestDistroForSelectsDriver(t *testing.T) {

@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/danewalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/inventory"
 )
 
 // Infra describes the machines behind a cluster and how buidl should turn them

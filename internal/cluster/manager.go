@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/inventory"
-	"github.com/danewalker/buidl/internal/remote"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/remote"
 )
 
 // Logger is the output surface this package needs.

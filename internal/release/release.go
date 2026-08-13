@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danewalker/buidl/internal/gitinfo"
+	"github.com/danecwalker/buidl/internal/gitinfo"
 )
 
 // Label and annotation keys written onto every object buidl manages. The

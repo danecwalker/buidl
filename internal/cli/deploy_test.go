@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/ui"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/ui"
 )
 
 // TestCheckPromoteRepositories covers the case where a promotion would pair the

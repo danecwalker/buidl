@@ -6,8 +6,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 // deployment builds a minimal Deployment as unstructured, for diffing.

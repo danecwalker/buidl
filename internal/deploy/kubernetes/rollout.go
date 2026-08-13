@@ -12,8 +12,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 // terminalPodReasons are container states that will never resolve on their own.

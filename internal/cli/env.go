@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/danewalker/buidl/internal/hooks"
-	"github.com/danewalker/buidl/internal/secrets"
+	"github.com/danecwalker/buidl/internal/hooks"
+	"github.com/danecwalker/buidl/internal/secrets"
 )
 
 // newEnvCmd inspects the environment an app will be deployed with.

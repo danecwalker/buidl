@@ -18,14 +18,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/danewalker/buidl/internal/cluster"
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/deploy"
-	_ "github.com/danewalker/buidl/internal/deploy/kubernetes" // register the kubernetes backend
-	"github.com/danewalker/buidl/internal/gitinfo"
-	"github.com/danewalker/buidl/internal/release"
-	"github.com/danewalker/buidl/internal/secrets"
-	"github.com/danewalker/buidl/internal/ui"
+	"github.com/danecwalker/buidl/internal/cluster"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/deploy"
+	_ "github.com/danecwalker/buidl/internal/deploy/kubernetes" // register the kubernetes backend
+	"github.com/danecwalker/buidl/internal/gitinfo"
+	"github.com/danecwalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/secrets"
+	"github.com/danecwalker/buidl/internal/ui"
 )
 
 // Version is set at link time via -ldflags.

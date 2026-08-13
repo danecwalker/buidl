@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/danewalker/buidl/internal/cluster"
-	"github.com/danewalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/cluster"
+	"github.com/danecwalker/buidl/internal/inventory"
 )
 
 // newClusterCmd groups the commands that turn servers into a cluster.

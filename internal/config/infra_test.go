@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danewalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/inventory"
 )
 
 const infraBase = `

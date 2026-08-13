@@ -6,7 +6,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/danewalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 func TestUnifiedDiffDetectsChangedLine(t *testing.T) {

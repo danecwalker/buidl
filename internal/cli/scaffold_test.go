@@ -6,8 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/project"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/project"
 )
 
 // TestGithubWorkflowIsValidYAML guards the CI template.
@@ -41,6 +41,13 @@ func TestGithubWorkflowIsValidYAML(t *testing.T) {
 	// Production must be a promotion, never a rebuild.
 	if !strings.Contains(githubWorkflow, "buidl promote --from staging --to production") {
 		t.Error("the production job should promote rather than rebuild")
+	}
+	// The download URL must hit the published repo. github.com/danewalker/buidl 404s.
+	if !strings.Contains(githubWorkflow, "https://github.com/danecwalker/buidl/releases/latest/download/buidl-linux-amd64") {
+		t.Error("the install step should download from github.com/danecwalker/buidl")
+	}
+	if strings.Contains(githubWorkflow, "github.com/danewalker/buidl") {
+		t.Error("the workflow still points at github.com/danewalker/buidl, which does not exist")
 	}
 	// Full history is needed for buidl to record provenance.
 	if !strings.Contains(githubWorkflow, "fetch-depth: 0") {

@@ -10,8 +10,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
-	"github.com/danewalker/buidl/internal/inventory"
-	"github.com/danewalker/buidl/internal/remote"
+	"github.com/danecwalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/remote"
 )
 
 // Kubeconfig fetches the admin kubeconfig from a control-plane node and rewrites

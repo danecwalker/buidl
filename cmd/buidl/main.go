@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/danewalker/buidl/internal/cli"
+	"github.com/danecwalker/buidl/internal/cli"
 )
 
 // version is overridden at build time:

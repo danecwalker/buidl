@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danewalker/buidl/internal/deploy"
-	"github.com/danewalker/buidl/internal/release"
-	"github.com/danewalker/buidl/internal/ui"
+	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/release"
+	"github.com/danecwalker/buidl/internal/ui"
 )
 
 // newTestApp builds an App whose output is captured, so rendering can be asserted

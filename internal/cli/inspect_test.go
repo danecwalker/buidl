@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danewalker/buidl/internal/ui"
+	"github.com/danecwalker/buidl/internal/ui"
 )
 
 // TestManifestNeedsNoClusterCredentials covers the documented GitOps use,

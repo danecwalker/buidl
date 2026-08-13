@@ -53,8 +53,6 @@ First tagged release.
   and apply, but only unit tests have exercised them.
 - Accessories are never pruned, are fixed at one replica, and their rollout is
   not waited on.
-- No published release binaries yet, so the documented `curl` install does not
-  work. Build from source.
 - RKE2, blue-green cutover, version upgrades against a running cluster and
   multi-arch builds are implemented but have never been exercised against real
   infrastructure.
@@ -62,5 +60,5 @@ First tagged release.
   control plane at a time. It does **not** cordon and drain first, so pods are
   restarted rather than gracefully evicted.
 
-[Unreleased]: https://github.com/danewalker/buidl/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/danewalker/buidl/releases/tag/v0.1.0
+[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/danecwalker/buidl/releases/tag/v0.1.0

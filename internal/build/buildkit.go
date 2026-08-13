@@ -30,7 +30,7 @@ import (
 	"github.com/moby/buildkit/util/progress/progressui"
 	"golang.org/x/sync/errgroup"
 
-	buidlconfig "github.com/danewalker/buidl/internal/config"
+	buidlconfig "github.com/danecwalker/buidl/internal/config"
 )
 
 // exporterDigestKey is where BuildKit reports the pushed manifest digest.

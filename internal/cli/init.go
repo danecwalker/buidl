@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/danewalker/buidl/internal/config"
-	"github.com/danewalker/buidl/internal/hooks"
-	"github.com/danewalker/buidl/internal/project"
-	"github.com/danewalker/buidl/internal/secrets"
+	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/hooks"
+	"github.com/danecwalker/buidl/internal/project"
+	"github.com/danecwalker/buidl/internal/secrets"
 )
 
 // newInitCmd scaffolds a project.
@@ -177,7 +177,7 @@ func resolveImage(image, registry, app string) (string, error) {
 func renderConfig(d project.Detection, image string) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, `# buidl configuration. Docs: https://github.com/danewalker/buidl
+	fmt.Fprintf(&b, `# buidl configuration. Docs: https://github.com/danecwalker/buidl
 version: %d
 
 app: %s

@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately via GitHub's [private vulnerability
-reporting](https://github.com/danewalker/buidl/security/advisories/new) rather
+reporting](https://github.com/danecwalker/buidl/security/advisories/new) rather
 than opening a public issue.
 
 Please include what an attacker gains, the configuration required, and a way to

@@ -1,5 +1,5 @@
 BINARY := buidl
-PKG    := github.com/danewalker/buidl/cmd/buidl
+PKG    := github.com/danecwalker/buidl/cmd/buidl
 
 # Prefer a tag; fall back to a short sha so a dev build is still identifiable.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
