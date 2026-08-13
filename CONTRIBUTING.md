@@ -21,8 +21,6 @@ image `USER` that Kubernetes refuses to verify, a rollback losing a write race
 to the Deployment controller. Every one of those passed the unit suite cleanly.
 
 ```sh
-docker run -d --name buildkitd --privileged moby/buildkit:latest
-export BUILDKIT_HOST=docker-container://buildkitd
 export DEMO_SECRET=any-value-for-testing
 make acceptance
 ```

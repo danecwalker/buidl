@@ -129,7 +129,7 @@ func TestBuildKitHintIsActionable(t *testing.T) {
 	// "no buildkit" is the most likely first-run failure, so the message must
 	// contain a command the user can run.
 	hint := buildkitHint()
-	for _, want := range []string{"BUILDKIT_HOST", "docker run", "rootless"} {
+	for _, want := range []string{"BUILDKIT_HOST", "buildkitd", defaultBuilderImage, "rootless"} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("hint should mention %q:\n%s", want, hint)
 		}

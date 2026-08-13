@@ -11,9 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -361,20 +359,6 @@ func (a *App) environmentFlag() string {
 		return ""
 	}
 	return " -e " + a.cfg.Environment
-}
-
-// context returns a command context that cancels on SIGINT/SIGTERM and after the
-// configured timeout.
-//
-// Handling the signal rather than dying immediately matters: an interrupted
-// deploy should stop waiting, not abandon a half-applied rollout silently.
-func (a *App) context() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), a.opts.timeout)
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	return ctx, func() {
-		stop()
-		cancel()
-	}
 }
 
 // requireEnvironment produces a helpful error when an environment is needed but

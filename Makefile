@@ -27,7 +27,6 @@ test-race:
 # tests cannot: BuildKit talking to a registry, server-side apply, rollout gating,
 # and the failure diagnostics.
 #
-#   export BUILDKIT_HOST=docker-container://buildkitd
 #   export DEMO_SECRET=any-value
 #   make acceptance
 .PHONY: acceptance

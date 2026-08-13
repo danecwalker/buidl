@@ -82,7 +82,7 @@ func (b *BuildKit) connect(ctx context.Context) (*bkclient.Client, error) {
 		return b.client, nil
 	}
 
-	addr, err := b.resolveAddr()
+	addr, err := b.resolveAddr(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -98,9 +98,9 @@ func (b *BuildKit) connect(ctx context.Context) (*bkclient.Client, error) {
 // resolveAddr finds a buildkitd endpoint, preferring explicit configuration.
 //
 // The search order exists so the common cases need no configuration: a
-// developer with rootless buildkitd running, and a CI job that sets
-// BUILDKIT_HOST (as the setup-buildx action does).
-func (b *BuildKit) resolveAddr() (string, error) {
+// developer with Docker (or a rootless socket) already running, and a CI job
+// that sets BUILDKIT_HOST (as the setup-buildx action does).
+func (b *BuildKit) resolveAddr(ctx context.Context) (string, error) {
 	if b.cfg.Build.Addr != "" {
 		return b.cfg.Build.Addr, nil
 	}
@@ -120,17 +120,27 @@ func (b *BuildKit) resolveAddr() (string, error) {
 		return "unix:///run/buildkit/buildkitd.sock", nil
 	}
 
+	addr, err := discoverContainerBuilder(ctx, b.log)
+	if err != nil {
+		return "", err
+	}
+	if addr != "" {
+		return addr, nil
+	}
+
 	return "", errors.New("no buildkit endpoint found\n\n" + buildkitHint())
 }
 
 // buildkitHint tells the user how to get a builder, since "no buildkit" is the
 // single most likely first-run failure.
 func buildkitHint() string {
-	return `buidl builds without a Docker daemon, so it needs a BuildKit endpoint. Pick one:
+	return fmt.Sprintf(`buidl builds without a Docker daemon, so it needs a BuildKit endpoint. Pick one:
 
-  local (docker available):
-    docker run -d --name buildkitd --privileged moby/buildkit:latest
-    export BUILDKIT_HOST=docker-container://buildkitd
+  local (Docker, Podman, or nerdctl):
+    buidl uses a container named buildkitd, or any running moby/buildkit
+    (including a Docker Buildx builder). If none exists it creates
+    %s as buildkitd. Set BUILDKIT_HOST or build.addr
+    to override.
 
   rootless (no docker, no root):
     https://github.com/moby/buildkit/blob/master/docs/rootless.md
@@ -141,7 +151,7 @@ func buildkitHint() string {
       addr: kube-pod://buildkitd?namespace=buidl-system
 
   Supported address schemes: unix://, tcp://, docker-container://,
-  kube-pod://, podman-container://, nerdctl-container://, ssh://`
+  kube-pod://, podman-container://, nerdctl-container://, ssh://`, defaultBuilderImage)
 }
 
 // Close releases the connection.

@@ -9,7 +9,7 @@
 #
 # Requirements:
 #   - a kubeconfig context pointing at a working cluster
-#   - a BuildKit endpoint (BUILDKIT_HOST)
+#   - a BuildKit endpoint (auto-discovered, or BUILDKIT_HOST)
 #   - push access to the registry in examples/hello/buidl.yaml
 #   - DEMO_SECRET set (the example declares it under env.secret)
 #
@@ -86,10 +86,8 @@ preflight() {
     missing=1
   fi
 
-  if [[ -z "${BUILDKIT_HOST:-}" ]]; then
-    red "BUILDKIT_HOST is not set. For a local container builder:"
-    red "  docker run -d --name buildkitd --privileged moby/buildkit:latest"
-    red "  export BUILDKIT_HOST=docker-container://buildkitd"
+  if [[ -z "${BUILDKIT_HOST:-}" ]] && ! command -v docker >/dev/null 2>&1; then
+    red "need docker on PATH (buidl will create a BuildKit container) or BUILDKIT_HOST"
     missing=1
   fi
 
@@ -107,7 +105,7 @@ preflight() {
   [[ $missing -eq 0 ]] || exit 1
 
   green "  cluster:  $(kubectl config current-context)"
-  green "  builder:  $BUILDKIT_HOST"
+  green "  builder:  ${BUILDKIT_HOST:-auto}"
   green "  buidl:    $BUIDL"
 }
 

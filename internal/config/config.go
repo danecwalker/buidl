@@ -121,8 +121,9 @@ type Build struct {
 	Platforms []string `yaml:"platforms"`
 
 	// Addr is the BuildKit endpoint. Empty means "discover one":
-	// $BUILDKIT_HOST, then a local buildkitd socket, then an in-cluster
-	// buildkitd found via the Kubernetes context.
+	// $BUILDKIT_HOST, then a local buildkitd socket, then a Docker/Podman
+	// container named buildkitd (or any running moby/buildkit). If none of
+	// those exist, buidl creates a pinned moby/buildkit image as buildkitd.
 	Addr string `yaml:"addr"`
 
 	// Cache selects the cache backend: "registry" (portable across CI runners),

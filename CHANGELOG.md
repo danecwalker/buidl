@@ -11,6 +11,16 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- Ctrl+C asks for confirmation: a second press within 5s exits the process. The
+  first press no longer cancels the command. SIGTERM still exits immediately.
+- BuildKit discovery finds a Docker/Podman/nerdctl container named `buildkitd`
+  (and will start it if it is stopped), or any running `moby/buildkit`
+  container such as a Buildx builder. If none exists, buidl creates
+  `moby/buildkit:v0.25.1` (pinned to the client in go.mod, not `:latest`).
+  `BUILDKIT_HOST` is no longer required.
+
 ## [0.1.1] — 2026-08-13
 
 ### Changed

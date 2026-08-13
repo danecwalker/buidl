@@ -399,7 +399,7 @@ Output is plain in CI, colored on a terminal, or newline-delimited JSON with `-o
 
 ## Requirements
 
-- A BuildKit endpoint, unless `build.driver: prebuilt`. Discovery order: `build.addr`, `$BUILDKIT_HOST`, a rootless socket, then `/run/buildkit/buildkitd.sock`.
+- A BuildKit endpoint, unless `build.driver: prebuilt`. Discovery order: `build.addr`, `$BUILDKIT_HOST`, a rootless socket, `/run/buildkit/buildkitd.sock`, then a Docker/Podman/nerdctl container named `buildkitd` (or any running `moby/buildkit`, including a Buildx builder). If none of those exist, buidl creates `moby/buildkit:v0.25.1` as `buildkitd`.
 - Kubernetes 1.30+, for server-side apply and `preStop.sleep`.
 - cert-manager if `proxy.ssl: true`.
 - An ingress controller if `proxy.host` is set.
@@ -460,8 +460,6 @@ make acceptance  # real cluster and registry
 ```
 
 ```sh
-docker run -d --name buildkitd --privileged moby/buildkit:latest
-export BUILDKIT_HOST=docker-container://buildkitd
 export DEMO_SECRET=any-value-for-testing
 make acceptance
 KEEP=1 ./test/acceptance/run.sh healthy
