@@ -70,8 +70,8 @@ infra:
     # test here. A production cluster needs a load balancer or DNS record
     # fronting all three, or this address becomes the single point of failure
     # that HA was meant to remove.
-    controlPlaneEndpoint: 45.77.233.71
-    tlsSANs: [45.77.233.71, 45.32.191.119, 45.63.26.34]
+    controlPlaneEndpoint: 203.0.113.1
+    tlsSANs: [203.0.113.1, 203.0.113.2, 203.0.113.3]
 
   addons:
     certManager: false
@@ -79,9 +79,9 @@ infra:
     buildkit: false
 
   servers:
-    - {host: 45.77.233.71, role: control-plane}
-    - {host: 45.32.191.119, role: control-plane}
-    - {host: 45.63.26.34, role: control-plane}
+    - {host: 203.0.113.1, role: control-plane}
+    - {host: 203.0.113.2, role: control-plane}
+    - {host: 203.0.113.3, role: control-plane}
 
 environments:
   # Source environment for the promotion.

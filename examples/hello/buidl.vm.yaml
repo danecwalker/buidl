@@ -76,8 +76,8 @@ infra:
     metricsServer: false
 
   servers:
-    - {host: 192.168.139.56, role: control-plane}
-    - {host: 192.168.139.158, role: worker, labels: {pool: apps}}
+    - {host: 192.168.1.10, role: control-plane}
+    - {host: 192.168.1.11, role: worker, labels: {pool: apps}}
 
 environments:
   vm:

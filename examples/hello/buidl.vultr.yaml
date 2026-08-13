@@ -94,7 +94,7 @@ infra:
 
   servers:
     # From: tofu output -raw ipv4
-    - host: 149.28.175.214
+    - host: 203.0.113.10
       role: control-plane
 
 environments:

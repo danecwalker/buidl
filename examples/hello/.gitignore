@@ -4,3 +4,8 @@
 
 # buidl local secret values (secrets-common is committed on purpose)
 .buidl/secrets.*
+
+# The compiled example binary. It was committed once by accident: it is a 7.9MB
+# platform-specific artifact, so it is useless to anyone on another OS and it
+# bloats every clone.
+hello
