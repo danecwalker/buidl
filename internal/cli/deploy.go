@@ -42,6 +42,12 @@ to it exactly.`,
 				return err
 			}
 
+			// Only the commands that mint a release need a commit to attribute
+			// it to. Lint and inspection commands work fine without one.
+			if err := a.git.RequireCommit(); err != nil {
+				return err
+			}
+
 			rel := a.newRelease(releaseID)
 			rel, err := a.buildRelease(ctx, rel, push, noCache, platforms)
 			if err != nil {
@@ -192,6 +198,10 @@ Examples:
 
 			secretValues, err := a.resolveSecrets()
 			if err != nil {
+				return err
+			}
+
+			if err := a.git.RequireCommit(); err != nil {
 				return err
 			}
 

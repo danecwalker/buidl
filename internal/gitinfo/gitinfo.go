@@ -29,6 +29,10 @@ type Info struct {
 	Dirty bool
 	// Available is false when the directory is not a git repository. buidl still
 	// works (falling back to timestamp-based release IDs); it just records less.
+	//
+	// Available with an empty SHA means a repository that exists but has no
+	// commits yet. That is a legitimate state for every command except the ones
+	// that mint a release; see RequireCommit.
 	Available bool
 }
 
@@ -65,11 +69,21 @@ func Load(ctx context.Context, dir string) (Info, error) {
 	}
 	info.Dirty = strings.TrimSpace(status) != ""
 
-	if info.SHA == "" {
-		// A repo with no commits yet.
-		return info, errors.New("repository has no commits; commit before deploying")
-	}
 	return info, nil
+}
+
+// RequireCommit reports whether there is a commit to attribute a release to.
+//
+// An empty repository is not an error in itself. `config validate`, `manifest`
+// and `init` all work fine without a commit, and failing them was wrong: a
+// freshly scaffolded project is exactly when someone runs validate, and a lint
+// command that demands a commit first is a lint command nobody can use. Only
+// the commands that mint a release need provenance, so they ask for it here.
+func (i Info) RequireCommit() error {
+	if i.Available && i.SHA == "" {
+		return errors.New("repository has no commits; commit before deploying so the release records where it came from")
+	}
+	return nil
 }
 
 // branchFromCI recovers the branch name on providers that check out detached

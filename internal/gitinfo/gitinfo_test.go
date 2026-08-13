@@ -111,3 +111,40 @@ func TestLoadInRepository(t *testing.T) {
 		t.Error("expected Dirty to be true with an untracked file")
 	}
 }
+
+// An empty repository must not fail commands that do not mint a release.
+//
+// This shipped broken: `buidl config validate` on a freshly scaffolded project
+// exited non-zero with "repository has no commits", which is exactly when
+// someone runs validate. CI caught it via the `init produces a valid project`
+// smoke test.
+func TestEmptyRepositoryIsNotAnError(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Skipf("git unavailable: %v: %s", err, out)
+	}
+
+	info, err := Load(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("Load on an empty repo returned %v, want nil", err)
+	}
+	if !info.Available {
+		t.Error("Available = false; an initialised repo with no commits is still a repo")
+	}
+	if info.SHA != "" {
+		t.Errorf("SHA = %q, want empty", info.SHA)
+	}
+
+	// But a command that mints a release still refuses.
+	if err := info.RequireCommit(); err == nil {
+		t.Error("RequireCommit() = nil; a release needs a commit to attribute it to")
+	}
+}
+
+// Outside a repository entirely, RequireCommit must stay silent: buidl supports
+// deploying from a plain directory with timestamp-based release IDs.
+func TestRequireCommitIgnoresNonRepositories(t *testing.T) {
+	if err := (Info{Available: false}).RequireCommit(); err != nil {
+		t.Errorf("RequireCommit() = %v, want nil outside a repository", err)
+	}
+}
