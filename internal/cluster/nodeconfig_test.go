@@ -63,6 +63,63 @@ func TestBootstrapConfigInitializesCluster(t *testing.T) {
 	if doc["cluster-cidr"] != "10.42.0.0/16" {
 		t.Errorf("cluster-cidr = %v", doc["cluster-cidr"])
 	}
+	if _, present := doc["flannel-ipv6-masq"]; present {
+		t.Error("IPv4-only clusterCIDR must not set flannel-ipv6-masq")
+	}
+}
+
+func TestK3sDualStackMasqueradesPodIPv6(t *testing.T) {
+	server := inventory.Server{Host: "10.0.0.1", Role: inventory.RoleControlPlane}
+	plan := testPlan(config.ClusterKubernetes{
+		ClusterCIDR: config.DefaultClusterCIDR,
+		ServiceCIDR: config.DefaultServiceCIDR,
+	}, server)
+
+	rendered, err := renderNodeConfig(server, inventory.RoleControlPlane, true, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := parsed(t, rendered)
+	if doc["cluster-cidr"] != config.DefaultClusterCIDR {
+		t.Errorf("cluster-cidr = %v", doc["cluster-cidr"])
+	}
+	if doc["flannel-ipv6-masq"] != true {
+		t.Error("k3s dual-stack must set flannel-ipv6-masq so pod IPv6 is reachable")
+	}
+}
+
+func TestRKE2DualStackOmitsFlannelMasq(t *testing.T) {
+	server := inventory.Server{Host: "10.0.0.1", Role: inventory.RoleControlPlane}
+	plan := testPlan(config.ClusterKubernetes{
+		Distribution: config.DistributionRKE2,
+		ClusterCIDR:  config.DefaultClusterCIDR,
+		ServiceCIDR:  config.DefaultServiceCIDR,
+	}, server)
+
+	rendered, err := renderNodeConfig(server, inventory.RoleControlPlane, true, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := parsed(t, rendered)["flannel-ipv6-masq"]; present {
+		t.Error("RKE2 does not accept flannel-ipv6-masq")
+	}
+}
+
+func TestNodeIPAppendsHostIPv6(t *testing.T) {
+	server := inventory.Server{Host: "203.0.113.1", Role: inventory.RoleControlPlane, PrivateIP: "10.0.0.1"}
+	plan := testPlan(config.ClusterKubernetes{
+		ClusterCIDR: config.DefaultClusterCIDR,
+		ServiceCIDR: config.DefaultServiceCIDR,
+	}, server)
+	plan.NodeIPv6 = map[string]string{"203.0.113.1": "2a01:4f8:c015:6304::1"}
+
+	rendered, err := renderNodeConfig(server, inventory.RoleControlPlane, true, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed(t, rendered)["node-ip"]; got != "10.0.0.1,2a01:4f8:c015:6304::1" {
+		t.Errorf("node-ip = %v, want private IPv4 plus the host's public IPv6", got)
+	}
 }
 
 func TestClusterInitEvenForSingleNode(t *testing.T) {

@@ -170,7 +170,9 @@ resource "vultr_instance" "cp" {
       - ufw allow 80/tcp
       - ufw allow 443/tcp
       - ufw allow from 10.42.0.0/16 to any
+      - ufw allow from fd00:42::/56 to any
       - ufw allow from 10.43.0.0/16 to any
+      - ufw allow from fd00:43::/112 to any
       - ufw reload
   EOT
 }

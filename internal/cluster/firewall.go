@@ -129,10 +129,10 @@ func firewallWarning(infra *config.Infra, inv *inventory.Inventory, node NodePla
 	// traffic between pods, which fails as DNS timeouts and probes that never
 	// pass rather than as anything resembling a firewall problem.
 	fmt.Fprintf(&b, "\nplus forwarded traffic for the pod and service networks:\n\n")
-	if cidr := infra.Kubernetes.ClusterCIDR; cidr != "" {
+	for _, cidr := range config.SplitCIDRs(infra.Kubernetes.ClusterCIDR) {
 		fmt.Fprintf(&b, "  %s  pod network\n", cidr)
 	}
-	if cidr := infra.Kubernetes.ServiceCIDR; cidr != "" {
+	for _, cidr := range config.SplitCIDRs(infra.Kubernetes.ServiceCIDR) {
 		fmt.Fprintf(&b, "  %s  service network\n", cidr)
 	}
 
@@ -157,10 +157,8 @@ func firewallExample(kind FirewallKind, infra *config.Infra, inv *inventory.Inve
 		}
 		// "to any" is what covers forwarded traffic, not just traffic addressed
 		// to the host itself.
-		for _, cidr := range []string{infra.Kubernetes.ClusterCIDR, infra.Kubernetes.ServiceCIDR} {
-			if cidr != "" {
-				fmt.Fprintf(&b, "  ufw allow from %s to any\n", cidr)
-			}
+		for _, cidr := range firewallNetworks(infra) {
+			fmt.Fprintf(&b, "  ufw allow from %s to any\n", cidr)
 		}
 
 	case FirewallFirewalld:
@@ -169,10 +167,8 @@ func firewallExample(kind FirewallKind, infra *config.Infra, inv *inventory.Inve
 			fmt.Fprintf(&b, "  firewall-cmd --permanent --add-port=%s\n",
 				strings.Replace(strings.Fields(port)[0], ":", "-", 1))
 		}
-		for _, cidr := range []string{infra.Kubernetes.ClusterCIDR, infra.Kubernetes.ServiceCIDR} {
-			if cidr != "" {
-				fmt.Fprintf(&b, "  firewall-cmd --permanent --zone=trusted --add-source=%s\n", cidr)
-			}
+		for _, cidr := range firewallNetworks(infra) {
+			fmt.Fprintf(&b, "  firewall-cmd --permanent --zone=trusted --add-source=%s\n", cidr)
 		}
 		fmt.Fprintf(&b, "  firewall-cmd --reload\n")
 
@@ -182,4 +178,16 @@ func firewallExample(kind FirewallKind, infra *config.Infra, inv *inventory.Inve
 	}
 
 	return b.String()
+}
+
+// firewallNetworks is each pod and service CIDR on its own line. A comma
+// list is what k3s accepts; it is not what ufw or firewalld accept.
+func firewallNetworks(infra *config.Infra) []string {
+	if infra == nil {
+		return nil
+	}
+	var out []string
+	out = append(out, config.SplitCIDRs(infra.Kubernetes.ClusterCIDR)...)
+	out = append(out, config.SplitCIDRs(infra.Kubernetes.ServiceCIDR)...)
+	return out
 }

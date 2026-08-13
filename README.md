@@ -298,6 +298,40 @@ The `cluster` commands are for inspection and teardown:
 | `cluster kubeconfig` | fetch credentials and merge into `~/.kube/config` |
 | `cluster reset` | uninstall Kubernetes. Leaves the servers running. Type the environment name, or pass `--yes`. |
 
+### Dual-stack (IPv4 and IPv6)
+
+New clusters are dual-stack. The defaults are:
+
+```yaml
+infra:
+  kubernetes:
+    clusterCIDR: 10.42.0.0/16,fd00:42::/56
+    serviceCIDR: 10.43.0.0/16,fd00:43::/112
+```
+
+Pod and service IPv6 is ULA (`fd00::/8`), so it does not consume the host's public `/64`. k3s also gets `flannel-ipv6-masq`, which SNATs pod IPv6 to the node's public address. RKE2 gets the same CIDRs and does not get the flannel key.
+
+This is required for public TLS. Let's Encrypt prefers IPv6 whenever a name has an AAAA. An IPv4-only ingress on a host with a public AAAA fails HTTP-01 and Traefik keeps serving its default certificate.
+
+DNS and the cloud firewall have to match:
+
+- A record: the server's IPv4
+- AAAA record: the server's IPv6 (on Hetzner, `2a01:...::1` from the assigned `/64`, not the `/64` itself)
+- 80/443 open from `0.0.0.0/0` and `::/0`
+
+`privateIP` still pins `node-ip` to the private IPv4. If the host also has a global IPv6, buidl appends it so ServiceLB publishes both families.
+
+Opt out by setting both CIDRs to IPv4-only. Mixed families (IPv6 pods, IPv4-only services) are rejected.
+
+An existing IPv4-only cluster cannot pick this up in place. Rewriting `cluster-cidr` on a running node crash-loops flannel. Rebuild it:
+
+```sh
+buidl cluster reset -e production    # type the environment name, or pass --yes
+buidl deploy -e production
+```
+
+`cluster reset` uninstalls Kubernetes and leaves the machines running. The next `deploy` bootstraps a new dual-stack cluster.
+
 Only `infra.provider: static` is implemented. Addresses go in `buidl.yaml`. The inventory interface exists so a later provider can read `tofu output -json` or an Ansible inventory without changing the cluster code.
 
 ### OpenTofu owns the machines
@@ -322,7 +356,8 @@ buidl deploy -e vultr -f examples/hello/buidl.vultr.yaml
 - If no server can be reached, that is an error, not "no changes".
 - Two control planes is worse than one (twice the failure surface, still zero fault tolerance). buidl warns. More than one control plane without `controlPlaneEndpoint` is an error.
 - Single-node clusters still use embedded etcd, so they can grow later.
-- `privateIP` sets `node-ip` so cluster traffic stays on the private network.
+- `privateIP` sets `node-ip` so cluster traffic stays on the private network. If the host also has a global IPv6, it is appended so ServiceLB can publish both families.
+- New clusters are dual-stack. See [Dual-stack](#dual-stack-ipv4-and-ipv6). Existing IPv4-only clusters need `cluster reset` then `deploy`, not a live CIDR rewrite.
 - Host keys are checked by default. Unknown keys fail with instructions to run `ssh-keyscan`, or set `infra.ssh.acceptNewHostKeys: true` for trust-on-first-use. A mismatched key always fails.
 - The join token is never printed, is written `0600`, and is generated with `crypto/rand` when you do not supply one.
 - Remote commands are single-quote escaped. File content is streamed over stdin, not pasted into `echo`.
@@ -404,6 +439,7 @@ Output is plain in CI, colored on a terminal, or newline-delimited JSON with `-o
 - cert-manager if `proxy.ssl: true`.
 - An ingress controller if `proxy.host` is set.
 - metrics-server if `deploy.autoscale` is set.
+- For public TLS with an AAAA record: 80 and 443 reachable on IPv6. Let's Encrypt validates over IPv6 first.
 
 Writes use server-side apply with field manager `buidl`. Per app and environment that is a `ServiceAccount`, `Deployment`, `Service`, and optionally `Secret`, `Ingress`, `HorizontalPodAutoscaler`, `PodDisruptionBudget`, `Namespace`. Objects get `app.kubernetes.io/*` labels and `buidl.dev/*` annotations (release, digest, commit, actor, timestamp).
 

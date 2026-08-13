@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -48,6 +49,11 @@ type nodeConfig struct {
 	ClusterCIDR string `yaml:"cluster-cidr,omitempty"`
 	ServiceCIDR string `yaml:"service-cidr,omitempty"`
 
+	// FlannelIPv6Masq SNATs pod IPv6 to the node's address so return traffic
+	// from the internet can find the host. Required for dual-stack k3s; RKE2
+	// does not speak this key.
+	FlannelIPv6Masq bool `yaml:"flannel-ipv6-masq,omitempty"`
+
 	Disable []string `yaml:"disable,omitempty"`
 
 	// WriteKubeconfigMode makes the admin kubeconfig readable so buidl can fetch
@@ -70,7 +76,7 @@ func renderNodeConfig(
 	nc := nodeConfig{
 		Token:     plan.Token,
 		NodeName:  server.Name,
-		NodeIP:    server.PrivateIP,
+		NodeIP:    advertisedNodeIP(server.PrivateIP, plan.nodeIPv6(server.Host), k8s.ClusterCIDR),
 		NodeLabel: labelArgs(server.Labels),
 		NodeTaint: server.Taints,
 	}
@@ -81,6 +87,11 @@ func renderNodeConfig(
 		nc.ServiceCIDR = k8s.ServiceCIDR
 		nc.Disable = k8s.Disable
 		nc.TLSSAN = plan.TLSSANs
+		// k3s flannel will otherwise source pod IPv6 from the ULA range, which
+		// the internet cannot route. RKE2 rejects the key.
+		if k8s.Distribution != config.DistributionRKE2 && config.HasIPv6CIDR(k8s.ClusterCIDR) {
+			nc.FlannelIPv6Masq = true
+		}
 		// 0644 would expose cluster-admin to every local user; 0640 keeps it to
 		// root and its group, which is enough for buidl to read over sudo.
 		nc.WriteKubeconfigMode = "0640"
@@ -119,6 +130,22 @@ func renderNodeConfig(
 
 	header := fmt.Sprintf("# Managed by buidl. Edits are overwritten on the next deploy.\n# node: %s (%s)\n", server.Host, role)
 	return header + string(out), nil
+}
+
+// advertisedNodeIP is what the node tells the cluster it is reachable at.
+//
+// privateIP alone pins IPv4, and k3s then omits the host's public IPv6 from
+// InternalIP. ServiceLB only publishes addresses the node advertised, so
+// ingress would stay IPv4-only on a dual-stack cluster. When the host has a
+// global IPv6 we append it.
+func advertisedNodeIP(private, globalIPv6, clusterCIDR string) string {
+	if private == "" {
+		return ""
+	}
+	if !config.HasIPv6CIDR(clusterCIDR) || globalIPv6 == "" || strings.Contains(private, ":") {
+		return private
+	}
+	return private + "," + globalIPv6
 }
 
 // labelArgs renders node labels as key=value pairs in a stable order.

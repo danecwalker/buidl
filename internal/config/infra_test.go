@@ -46,6 +46,31 @@ func TestInfraDefaults(t *testing.T) {
 	if in.Kubernetes.ClusterCIDR != DefaultClusterCIDR {
 		t.Errorf("clusterCIDR = %q", in.Kubernetes.ClusterCIDR)
 	}
+	if in.Kubernetes.ServiceCIDR != DefaultServiceCIDR {
+		t.Errorf("serviceCIDR = %q", in.Kubernetes.ServiceCIDR)
+	}
+	if !HasIPv6CIDR(in.Kubernetes.ClusterCIDR) || !HasIPv6CIDR(in.Kubernetes.ServiceCIDR) {
+		t.Error("defaults must be dual-stack so ingress has an IPv6 path")
+	}
+}
+
+func TestMismatchedCIDRFamiliesRejected(t *testing.T) {
+	_, err := Load(LoadOptions{Path: write(t, `
+app: api
+image: ghcr.io/acme/api
+infra:
+  kubernetes:
+    clusterCIDR: 10.42.0.0/16,fd00:42::/56
+    serviceCIDR: 10.43.0.0/16
+  servers:
+    - {host: 10.0.0.1, role: control-plane}
+`), Strict: true})
+	if err == nil {
+		t.Fatal("expected mixed IP families to be rejected")
+	}
+	if !strings.Contains(err.Error(), "same IP families") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestInfraAbsentIsValid(t *testing.T) {

@@ -11,6 +11,19 @@ do about them.
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-08-14
+
+### Changed
+
+- New clusters are dual-stack. Defaults are `10.42.0.0/16,fd00:42::/56` (pods)
+  and `10.43.0.0/16,fd00:43::/112` (services). k3s also gets
+  `flannel-ipv6-masq`. `privateIP` still pins IPv4; a host global IPv6 is
+  appended to `node-ip` so ServiceLB publishes both families.
+- An existing IPv4-only cluster cannot take this in place (flannel crash-loops).
+  Run `buidl cluster reset` then `buidl deploy`. Set both CIDRs to IPv4-only to
+  opt out. Let's Encrypt prefers IPv6 when an AAAA exists, so IPv4-only ingress
+  cannot complete HTTP-01.
+
 ## [0.1.2] — 2026-08-14
 
 ### Changed
@@ -83,7 +96,8 @@ First tagged release.
   control plane at a time. It does **not** cordon and drain first, so pods are
   restarted rather than gracefully evicted.
 
-[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/danecwalker/buidl/releases/tag/v0.1.3
 [0.1.2]: https://github.com/danecwalker/buidl/releases/tag/v0.1.2
 [0.1.1]: https://github.com/danecwalker/buidl/releases/tag/v0.1.1
 [0.1.0]: https://github.com/danecwalker/buidl/releases/tag/v0.1.0

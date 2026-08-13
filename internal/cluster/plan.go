@@ -67,6 +67,10 @@ type Facts struct {
 	// ship one allowing only SSH, which blocks the API server and ingress while
 	// leaving SSH — and therefore the whole install — working perfectly.
 	Firewall FirewallKind
+
+	// GlobalIPv6 is a globally-scoped address on the host, if any. Used so
+	// node-ip can stay dual-stack when privateIP would otherwise pin IPv4.
+	GlobalIPv6 string
 }
 
 // NodePlan is the planned change for one machine.
@@ -100,6 +104,9 @@ type Plan struct {
 	// Token is the cluster join secret: read from the bootstrap node when a
 	// cluster already exists, supplied by config, or generated.
 	Token string
+
+	// NodeIPv6 is the chosen global IPv6 per host, filled during fact gathering.
+	NodeIPv6 map[string]string
 
 	Nodes []NodePlan
 	// Addons is the planned state of every enabled addon. Installing one is part
@@ -240,6 +247,10 @@ func (m *Manager) probe(ctx context.Context, server inventory.Server) Facts {
 
 	f.Firewall = detectFirewall(ctx, client)
 
+	if res, err := client.Try(ctx, "ip -6 -o addr show scope global"); err == nil && res.ExitCode == 0 {
+		f.GlobalIPv6 = pickGlobalIPv6(res.Stdout)
+	}
+
 	if f.Installed {
 		if res, err := client.Try(ctx, m.distro.Name()+" --version"); err == nil && res.ExitCode == 0 {
 			f.CurrentVersion = firstLine(res.Stdout)
@@ -268,6 +279,7 @@ func (m *Manager) Plan(ctx context.Context) (*Plan, error) {
 		Bootstrap:           bootstrap,
 		RegistrationAddress: registrationAddress(m.infra.Kubernetes, bootstrap),
 		TLSSANs:             tlsSANs(m.infra.Kubernetes, inv),
+		NodeIPv6:            map[string]string{},
 	}
 
 	if w := inv.QuorumWarning(); w != "" {
@@ -276,6 +288,11 @@ func (m *Manager) Plan(ctx context.Context) (*Plan, error) {
 
 	m.log.Step(fmt.Sprintf("Inspecting %d server(s)", len(inv.Servers)))
 	facts := m.gatherFacts(ctx, inv)
+	for host, f := range facts {
+		if f.GlobalIPv6 != "" {
+			plan.NodeIPv6[host] = f.GlobalIPv6
+		}
+	}
 
 	// Establish the token before rendering node configs, since every config
 	// embeds it.
@@ -503,4 +520,11 @@ func orUnknownVersion(v string) string {
 		return "version unknown"
 	}
 	return v
+}
+
+func (p *Plan) nodeIPv6(host string) string {
+	if p == nil || p.NodeIPv6 == nil {
+		return ""
+	}
+	return p.NodeIPv6[host]
 }

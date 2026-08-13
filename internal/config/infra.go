@@ -89,7 +89,13 @@ type ClusterKubernetes struct {
 	// ControlPlaneEndpoint and every server address are added automatically.
 	TLSSANs []string `yaml:"tlsSANs"`
 
+	// ClusterCIDR is the pod network, k3s/RKE2 style: one CIDR or IPv4,IPv6.
+	// The default is dual-stack. Let's Encrypt prefers IPv6 whenever a name has
+	// an AAAA, so an IPv4-only cluster with a public AAAA cannot complete
+	// HTTP-01 and never gets a certificate.
 	ClusterCIDR string `yaml:"clusterCIDR"`
+	// ServiceCIDR is the Service network. Must cover the same IP families as
+	// ClusterCIDR.
 	ServiceCIDR string `yaml:"serviceCIDR"`
 
 	// Disable turns off bundled components, e.g. [traefik] to run a different
@@ -129,8 +135,10 @@ type Addons struct {
 const (
 	DefaultSSHUser     = "root"
 	DefaultSSHPort     = 22
-	DefaultClusterCIDR = "10.42.0.0/16"
-	DefaultServiceCIDR = "10.43.0.0/16"
+	// Dual-stack defaults. Pod/service IPv6 is ULA so it does not consume the
+	// host's public /64; flannel masquerades egress to the node's address.
+	DefaultClusterCIDR = "10.42.0.0/16,fd00:42::/56"
+	DefaultServiceCIDR = "10.43.0.0/16,fd00:43::/112"
 	DefaultBuildKitNS  = "buidl-system"
 )
 
@@ -211,6 +219,10 @@ func validateInfra(c *Config, add func(string, ...any)) {
 
 	if in.Addons.CertManager && in.Addons.CertManagerEmail == "" {
 		add("`infra.addons.certManagerEmail` is required when certManager is enabled (ACME needs a contact address)")
+	}
+
+	if err := checkDualStackCIDRs(in.Kubernetes.ClusterCIDR, in.Kubernetes.ServiceCIDR); err != nil {
+		add("%s", err)
 	}
 
 	// proxy.ssl depends on cert-manager existing in the cluster.
