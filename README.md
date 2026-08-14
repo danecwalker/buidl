@@ -17,7 +17,7 @@ That is the happy path. `plan`, `promote`, `rollback`, and `destroy` are there w
 curl -fsSL https://raw.githubusercontent.com/danecwalker/buidl/main/install.sh | bash
 ```
 
-That detects the platform, shows download progress, and verifies the SHA-256 against `checksums.txt` from the same GitHub release. The binary lands in `/usr/local/bin` when you can write there, otherwise `~/.local/bin`. Later upgrades are `buidl update`.
+That detects the platform, shows download progress, and verifies the SHA-256 against `checksums.txt` from the same GitHub release. The binary lands in `/usr/local/bin`. If you cannot write there, the installer prompts for sudo. Set `BUIDL_INSTALL_DIR` to install somewhere else. Later upgrades are `buidl update`.
 
 linux and darwin, amd64 and arm64. The binaries are static (`CGO_ENABLED=0`) and built with `-trimpath`.
 

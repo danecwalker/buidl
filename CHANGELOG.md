@@ -11,6 +11,12 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- `install.sh` installs to `/usr/local/bin` and prompts for sudo when that
+  directory is not writable, instead of falling back to `~/.local/bin`.
+  Set `BUIDL_INSTALL_DIR` to pick another location.
+
 ## [0.1.7] — 2026-08-14
 
 ### Added
