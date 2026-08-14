@@ -65,6 +65,22 @@ func TestLoadMinimalAppliesDefaults(t *testing.T) {
 	if cfg.Environment != "default" {
 		t.Errorf("Environment = %q, want default", cfg.Environment)
 	}
+	// An HTTP app with no replica pin gets an HPA, not a static replica count.
+	if cfg.Deploy.Autoscale == nil {
+		t.Fatal("expected a default HPA for an HTTP app")
+	}
+	if cfg.Deploy.Replicas != nil {
+		t.Errorf("Replicas = %d, want unset when an HPA owns scaling", *cfg.Deploy.Replicas)
+	}
+	if cfg.Deploy.Autoscale.CPUPercent != DefaultAutoscaleCPU {
+		t.Errorf("CPUPercent = %d, want %d", cfg.Deploy.Autoscale.CPUPercent, DefaultAutoscaleCPU)
+	}
+	if cfg.Deploy.Autoscale.Min != 1 || cfg.Deploy.Autoscale.Max != 4 {
+		t.Errorf("HPA bounds = %d/%d, want 1/4 on a single-node fallback", cfg.Deploy.Autoscale.Min, cfg.Deploy.Autoscale.Max)
+	}
+	if cfg.Deploy.Resources.Requests["cpu"] != DefaultRequestCPU {
+		t.Errorf("cpu request = %q, want %s (HPA needs a request)", cfg.Deploy.Resources.Requests["cpu"], DefaultRequestCPU)
+	}
 }
 
 func TestRegistryFromImage(t *testing.T) {
@@ -189,13 +205,35 @@ func TestUnknownEnvironmentIsRejected(t *testing.T) {
 	}
 }
 
-func TestMissingEnvironmentIsRejectedWhenEnvironmentsExist(t *testing.T) {
-	_, err := Load(LoadOptions{Path: write(t, withEnvironments), Strict: true})
+func TestMissingEnvironmentPicksStaging(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, withEnvironments), Strict: true})
+	if err != nil {
+		t.Fatalf("staging should be implied: %v", err)
+	}
+	if res.Config.Environment != "staging" {
+		t.Errorf("Environment = %q, want staging", res.Config.Environment)
+	}
+	if got := *res.Config.Deploy.Replicas; got != 1 {
+		t.Errorf("implied staging replicas = %d, want 1", got)
+	}
+}
+
+func TestMissingEnvironmentIsRejectedWhenOnlyProductionExists(t *testing.T) {
+	_, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+environments:
+  production:
+    deploy: {replicas: 3}
+`), Strict: true})
 	if err == nil {
-		t.Fatal("expected an error when no environment is selected")
+		t.Fatal("expected an error when the only environment is production")
 	}
 	if !strings.Contains(err.Error(), "--env") {
 		t.Errorf("error should tell the user to pass --env, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "production") {
+		t.Errorf("error should list production, got: %v", err)
 	}
 }
 
@@ -464,9 +502,9 @@ func TestValidation(t *testing.T) {
 			wantErr: "must be >= min",
 		},
 		{
-			name:    "autoscale without signal",
-			yaml:    "app: web\nimage: ghcr.io/acme/web\ndeploy: {autoscale: {min: 1, max: 5}}\n",
-			wantErr: "scaling signal",
+			name:    "autoscale negative min",
+			yaml:    "app: web\nimage: ghcr.io/acme/web\ndeploy: {autoscale: {min: -1, max: 5, cpuPercent: 70}}\n",
+			wantErr: "cannot be negative",
 		},
 		{
 			name:    "secret also in clear",
@@ -611,5 +649,99 @@ accessories:
 	}
 	if got := res.Config.Accessories["cache"].MountPath; got != "/data" {
 		t.Errorf("redis mountPath = %q", got)
+	}
+}
+
+func TestAutoscaleWithoutSignalDefaultsCPU(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  autoscale: {min: 1, max: 5}
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("an HPA without a signal should default cpuPercent: %v", err)
+	}
+	if got := res.Config.Deploy.Autoscale.CPUPercent; got != DefaultAutoscaleCPU {
+		t.Errorf("CPUPercent = %d, want %d", got, DefaultAutoscaleCPU)
+	}
+}
+
+func TestPreviewStaysAtOneReplica(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+environments:
+  preview:
+    deploy:
+      kubernetes: {namespace: web-preview, createNamespace: true, ephemeral: true}
+`), Environment: "preview", Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Config.Deploy.Autoscale != nil {
+		t.Error("preview must not get an HPA")
+	}
+	if res.Config.Deploy.Replicas == nil || *res.Config.Deploy.Replicas != 1 {
+		t.Errorf("preview replicas = %v, want 1", res.Config.Deploy.Replicas)
+	}
+}
+
+func TestWorkerStaysAtOneReplica(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: worker
+image: ghcr.io/acme/worker
+deploy:
+  healthcheck:
+    command: [pgrep, sidekiq]
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Config.Deploy.Autoscale != nil {
+		t.Error("a worker with an exec probe must not get an HPA")
+	}
+	if res.Config.Deploy.Replicas == nil || *res.Config.Deploy.Replicas != 1 {
+		t.Errorf("worker replicas = %v, want 1", res.Config.Deploy.Replicas)
+	}
+}
+
+func TestExplicitReplicasStayStatic(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  replicas: 3
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Config.Deploy.Autoscale != nil {
+		t.Error("explicit replicas must not grow an HPA")
+	}
+	if got := *res.Config.Deploy.Replicas; got != 3 {
+		t.Errorf("replicas = %d, want 3", got)
+	}
+}
+
+func TestFleetSizesDefaultHPA(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+infra:
+  servers:
+    - {host: 10.0.0.1, role: control-plane}
+    - {host: 10.0.1.1, role: worker}
+    - {host: 10.0.1.2, role: worker}
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	as := res.Config.Deploy.Autoscale
+	if as == nil {
+		t.Fatal("expected a default HPA")
+	}
+	if as.Min != 2 || as.Max != 9 {
+		t.Errorf("HPA bounds = %d/%d, want 2/9 for a 3-node fleet", as.Min, as.Max)
 	}
 }

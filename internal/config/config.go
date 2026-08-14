@@ -237,11 +237,21 @@ type Strategy struct {
 // Autoscale configures a HorizontalPodAutoscaler. When set, Replicas is treated
 // as the floor and is not reconciled on subsequent deploys (so we don't fight
 // the HPA).
+//
+// An HTTP app that omits both replicas and autoscale gets one of these by
+// default. Omitted min/max are derived from the fleet at load and again at
+// deploy, when the cluster's Ready node count may be a better signal.
 type Autoscale struct {
 	Min           int32 `yaml:"min"`
 	Max           int32 `yaml:"max"`
 	CPUPercent    int32 `yaml:"cpuPercent"`
 	MemoryPercent int32 `yaml:"memoryPercent"`
+
+	// derivedMin/derivedMax record that the bound was omitted in YAML and filled
+	// from the fleet. resolveScale may recompute them when a better node count
+	// is known; explicit values are never overwritten.
+	derivedMin bool `yaml:"-"`
+	derivedMax bool `yaml:"-"`
 }
 
 // Env splits configuration into values safe to render into manifests (Clear)
@@ -301,9 +311,9 @@ type Proxy struct {
 // plus a headless Service, with a PersistentVolumeClaim template when Storage
 // is set.
 //
-// Accessories are deliberately not reconciled on every deploy: the backend
-// renders them separately and applies them only when asked explicitly, so an app
-// rollout can never restart your database.
+// Accessories are created on first deploy if they are missing. Subsequent
+// deploys never update them, so an app rollout cannot restart a database.
+// `buidl accessory apply` is the reconcile path.
 type Accessory struct {
 	Image string   `yaml:"image"`
 	Port  int32    `yaml:"port"`

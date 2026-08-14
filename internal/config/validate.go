@@ -145,11 +145,16 @@ func Validate(c *Config) error {
 	}
 
 	// --- autoscale ---
+	// min/max of 0 mean "derive from the fleet" and are filled by
+	// ResolveAutoscale. Reject only impossible combinations.
 	if as := c.Deploy.Autoscale; as != nil {
-		if as.Min < 1 {
-			add("`deploy.autoscale.min` must be at least 1 (got %d)", as.Min)
+		if as.Min < 0 {
+			add("`deploy.autoscale.min` cannot be negative (got %d)", as.Min)
 		}
-		if as.Max < as.Min {
+		if as.Max < 0 {
+			add("`deploy.autoscale.max` cannot be negative (got %d)", as.Max)
+		}
+		if as.Min > 0 && as.Max > 0 && as.Max < as.Min {
 			add("`deploy.autoscale.max` (%d) must be >= min (%d)", as.Max, as.Min)
 		}
 		if as.CPUPercent == 0 && as.MemoryPercent == 0 {

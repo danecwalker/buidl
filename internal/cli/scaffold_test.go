@@ -106,6 +106,13 @@ func TestRenderedConfigIsValid(t *testing.T) {
 				if cfg.Deploy.Healthcheck.Path != det.HealthPath {
 					t.Errorf("healthcheck path = %q, want %q", cfg.Deploy.Healthcheck.Path, det.HealthPath)
 				}
+				if env == "preview" {
+					if cfg.Deploy.Autoscale != nil {
+						t.Error("generated preview should stay at one replica, not an HPA")
+					}
+				} else if cfg.Deploy.Autoscale == nil {
+					t.Errorf("generated %s should default to an HPA", env)
+				}
 			}
 
 			// The preview environment must derive a per-branch namespace, or every
@@ -127,7 +134,33 @@ func TestRenderedConfigIsValid(t *testing.T) {
 			if preview.Config.Deploy.Kubernetes.Ephemeral == nil || !*preview.Config.Deploy.Kubernetes.Ephemeral {
 				t.Error("preview should be marked ephemeral so destroy deletes the namespace")
 			}
+			if preview.Config.Deploy.Autoscale != nil {
+				t.Error("generated preview should stay at one replica, not an HPA")
+			}
+			if preview.Config.Deploy.Replicas == nil || *preview.Config.Deploy.Replicas != 1 {
+				t.Errorf("preview replicas = %v, want 1", preview.Config.Deploy.Replicas)
+			}
 		})
+	}
+}
+
+func TestRenderedConfigImpliesStaging(t *testing.T) {
+	rendered := renderConfig(project.Detection{
+		Kind: project.KindGo, Stack: project.KindGo,
+		Name: "web", Port: 8080, HealthPath: "/up",
+	}, "ghcr.io/acme/web")
+
+	if !strings.Contains(rendered, "defaultEnvironment: staging") {
+		t.Error("generated config should set defaultEnvironment: staging")
+	}
+	if strings.Contains(rendered, "replicas: 2") || strings.Contains(rendered, "replicas: 3") {
+		t.Error("generated config should not pin staging/production replica counts")
+	}
+	if !strings.Contains(rendered, "#infra:") {
+		t.Error("generated config should include a commented infra block")
+	}
+	if !strings.Contains(rendered, "certManagerEmail:") {
+		t.Error("generated infra comments should mention certManagerEmail")
 	}
 }
 
@@ -152,13 +185,13 @@ func TestEnvironmentsFromError(t *testing.T) {
 app: web
 image: ghcr.io/acme/web
 environments:
-  staging:
+  live:
   production:
 `),
 		Strict: true,
 	})
 	if err == nil {
-		t.Fatal("expected an error when no environment is selected")
+		t.Fatal("expected an error when no environment is selected and staging is absent")
 	}
 
 	// `config validate` recovers the environment list from this message.
@@ -166,7 +199,7 @@ environments:
 	if len(names) != 2 {
 		t.Fatalf("environmentsFromError = %v, want two names", names)
 	}
-	if names[0] != "production" || names[1] != "staging" {
+	if names[0] != "live" || names[1] != "production" {
 		t.Errorf("environmentsFromError = %v, want sorted names", names)
 	}
 }

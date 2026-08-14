@@ -26,8 +26,9 @@ type LoadOptions struct {
 	Path string
 	// Dir is where the search for a config file starts. Defaults to ".".
 	Dir string
-	// Environment names the overlay to apply. Required if the file declares any
-	// environments and no defaultEnvironment is set.
+	// Environment names the overlay to apply. When empty, defaultEnvironment is
+	// used, then an environment named "staging" if one is declared. Production
+	// is never implied.
 	Environment string
 	// Vars are injected into the interpolation context and take precedence over
 	// the process environment. This is how BUIDL_SHA, BUIDL_BRANCH, BUIDL_SLUG
@@ -168,6 +169,10 @@ func selectEnvironment(doc map[string]any, requested string) (names []string, ov
 	if requested == "" {
 		if def, ok := doc["defaultEnvironment"].(string); ok && def != "" {
 			requested = def
+		} else if implied := implicitEnvironment(names); implied != "" {
+			// Staging is the happy-path environment. Production is never implied:
+			// destroying or promoting the wrong one is worse than asking.
+			requested = implied
 		}
 	}
 
@@ -195,6 +200,17 @@ func selectEnvironment(doc map[string]any, requested string) (names []string, ov
 		return nil, nil, "", fmt.Errorf("environment %q must be a mapping", requested)
 	}
 	return names, m, requested, nil
+}
+
+// implicitEnvironment returns "staging" when that name is declared, using the
+// spelling from the file. Production-like names are never implied.
+func implicitEnvironment(names []string) string {
+	for _, n := range names {
+		if strings.EqualFold(n, "staging") {
+			return n
+		}
+	}
+	return ""
 }
 
 // deepMerge overlays src onto dst, recursing into nested mappings. Scalars and

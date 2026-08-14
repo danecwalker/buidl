@@ -22,19 +22,18 @@ import (
 // Accessories are supporting stateful services — a database, a cache, a queue —
 // that live alongside the app.
 //
-// They are rendered here and nowhere else, and they are applied only by
-// ApplyAccessories. Render, and therefore Plan, Deploy and Preflight, never see
-// them. That separation is the whole feature: an app deploy runs many times a
-// day and must be free to replace every pod it owns, and the one thing that must
-// never happen as a side effect of shipping a web app is a restarted database.
+// They are rendered here and nowhere else. ApplyAccessories is the full
+// reconcile and is only invoked by `buidl accessory apply`. Deploy calls
+// EnsureMissingAccessories, which creates objects that are absent and never
+// updates ones that already exist. That split is the whole feature: a first
+// `buidl deploy` can stand up Postgres, and a later deploy cannot restart it
+// because someone changed a log level.
+//
 // Folding accessories into Render would make "reconcile the database" the
 // default rather than a decision, and the failure mode — a Postgres pod cycled
 // because someone changed a log level — is unrecoverable in a way an app rollout
-// never is.
-//
-// The cost of that split is real and worth stating: an accessory can drift from
-// its configuration until someone asks buidl to reconcile it. Drift you can see
-// in a plan is a better trade than an implicit restart you cannot undo.
+// never is. Drift you can see in `accessory plan` is a better trade than an
+// implicit restart you cannot undo.
 const (
 	// accessoryComponent marks accessory objects so they are recognizably
 	// buidl-managed but never selected by the app's Service, PDB or spread
@@ -121,9 +120,8 @@ func (t *Target) PlanAccessories(ctx context.Context, req deploy.Request) (*depl
 
 // ApplyAccessories reconciles the configured accessories.
 //
-// Nothing else in this package calls it, and that is deliberate — see the
-// comment at the top of this file. It exists so reconciling an accessory is
-// always something a user asked for by name.
+// This is the explicit path: it updates objects that have drifted. Deploy
+// never calls it — see EnsureMissingAccessories.
 func (t *Target) ApplyAccessories(ctx context.Context, req deploy.Request) ([]deploy.Change, error) {
 	objs, err := t.RenderAccessories(req)
 	if err != nil {
@@ -135,6 +133,63 @@ func (t *Target) ApplyAccessories(ctx context.Context, req deploy.Request) ([]de
 
 	t.log.Step("Applying accessories")
 	return t.applyAll(ctx, objs, accessoryReplicas)
+}
+
+// EnsureMissingAccessories creates accessory objects that are not in the
+// cluster. Existing objects are left untouched, even when they have drifted
+// from buidl.yaml — updating them is `buidl accessory apply`.
+func (t *Target) EnsureMissingAccessories(ctx context.Context, req deploy.Request) error {
+	if len(req.Config.Accessories) == 0 {
+		return nil
+	}
+
+	// Accessories live in the app namespace. On a first deploy that namespace
+	// does not exist yet — Render would create it later, which is too late
+	// for the StatefulSet apply below.
+	if req.Config.Deploy.Kubernetes.CreateNamespace {
+		ns := t.namespace(req.Config, req.Release)
+		live, err := t.get(ctx, ns)
+		if err != nil {
+			return err
+		}
+		if live == nil {
+			if _, err := t.apply(ctx, ns, false); err != nil {
+				return fmt.Errorf("creating namespace %s for accessories: %w", t.Namespace, err)
+			}
+		}
+	}
+
+	objs, err := t.RenderAccessories(req)
+	if err != nil {
+		return err
+	}
+	missing, err := t.absentObjects(ctx, objs)
+	if err != nil {
+		return err
+	}
+	if len(missing) == 0 {
+		t.log.Detail("accessories already present")
+		return nil
+	}
+
+	t.log.Step("Creating missing accessories")
+	_, err = t.applyAll(ctx, missing, accessoryReplicas)
+	return err
+}
+
+// absentObjects returns the objects that do not exist in the cluster.
+func (t *Target) absentObjects(ctx context.Context, objs []Object) ([]Object, error) {
+	var missing []Object
+	for _, obj := range objs {
+		live, err := t.get(ctx, obj)
+		if err != nil {
+			return nil, err
+		}
+		if live == nil {
+			missing = append(missing, obj)
+		}
+	}
+	return missing, nil
 }
 
 // accessoryName is the object name shared by an accessory's StatefulSet and its

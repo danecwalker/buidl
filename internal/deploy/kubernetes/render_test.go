@@ -216,6 +216,48 @@ func TestZeroDowntimeStrategyDefaults(t *testing.T) {
 	}
 }
 
+func TestDefaultHTTPAppRendersHPA(t *testing.T) {
+	target, req := testRequest(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if findObject(objs, "HorizontalPodAutoscaler") == nil {
+		t.Fatal("an HTTP app with no replica pin should render an HPA")
+	}
+	dep := findObject(objs, "Deployment").Object.(*appsv1.Deployment)
+	if dep.Spec.Replicas != nil {
+		t.Errorf("replicas = %d, want unset when an HPA owns scaling", *dep.Spec.Replicas)
+	}
+	// Single-node fallback is min=1, so no PDB or spread.
+	if findObject(objs, "PodDisruptionBudget") != nil {
+		t.Error("did not expect a PDB when the HPA floor is 1")
+	}
+}
+
+func TestAutoscaleFloorDrivesPDB(t *testing.T) {
+	target, req := testRequest(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  autoscale: {min: 3, max: 10, cpuPercent: 70}
+`)
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if findObject(objs, "PodDisruptionBudget") == nil {
+		t.Error("expected a PDB when the HPA floor is above 1")
+	}
+	dep := findObject(objs, "Deployment").Object.(*appsv1.Deployment)
+	if len(dep.Spec.Template.Spec.TopologySpreadConstraints) == 0 {
+		t.Error("expected topology spread when the HPA floor is above 1")
+	}
+}
+
 func TestAutoscaleOmitsReplicas(t *testing.T) {
 	target, req := testRequest(t, renderBase+`
   autoscale: {min: 3, max: 10, cpuPercent: 70}

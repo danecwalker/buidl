@@ -165,6 +165,8 @@ func (t *Target) checkSelectorCompatibility(ctx context.Context, req deploy.Requ
 func (t *Target) Deploy(ctx context.Context, req deploy.Request) (*deploy.Outcome, error) {
 	start := time.Now()
 
+	t.resolveScale(ctx)
+
 	// Capture what is live now, so a failed rollout can be reverted and so the
 	// outcome can report what was replaced.
 	previous, _ := t.liveRelease(ctx, req.Config)

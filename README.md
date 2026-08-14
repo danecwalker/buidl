@@ -4,12 +4,10 @@ Build container images without a Docker daemon and deploy them to Kubernetes as 
 
 ```
 buidl init
-buidl plan    -e staging
-buidl deploy  -e staging
-buidl promote --from staging --to production
-buidl rollback -e production
-buidl destroy -e preview
+buidl deploy
 ```
+
+That is the happy path. `plan`, `promote`, `rollback`, and `destroy` are there when you need them. Staging is implied when `-e` is omitted; production is never implied. `destroy` always requires `-e`.
 
 `plan` and `deploy` can also install k3s or RKE2 on machines you already have. Creating those machines is not buidl's job. Use OpenTofu, Terraform, Ansible, or a cloud console, then list the hosts in `buidl.yaml`.
 
@@ -61,9 +59,8 @@ Needs a kubeconfig and a BuildKit endpoint (see [Requirements](#requirements)).
 ```sh
 cd my-app
 buidl init --registry ghcr.io/myorg
-# edit buidl.yaml: set proxy.host if the app is public
-buidl config validate
-buidl deploy -e staging
+# edit buidl.yaml: set proxy.host, infra.servers, and certManagerEmail
+buidl deploy
 ```
 
 `init` detects Go, Node, Python, Ruby, Rust, and static sites. If there is no Dockerfile it writes a multi-stage one. It also scaffolds `.buidl/` (secrets + hooks) and a GitHub Actions workflow.
@@ -86,7 +83,7 @@ app: web
 image: ghcr.io/acme/web
 ```
 
-That gives you 1 replica on port 8080, a `/up` readiness probe, a rolling update with `maxUnavailable: 0`, a non-root pod with all capabilities dropped, and a namespace named after the app.
+That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, a `/up` readiness probe, a rolling update with `maxUnavailable: 0`, a non-root pod with all capabilities dropped, and a namespace named after the app. Set `replicas` to pin a static count. Preview environments stay at one replica.
 
 A more complete file:
 
@@ -106,7 +103,6 @@ build:
 deploy:
   target: kubernetes
   port: 3000
-  replicas: 3
   healthcheck:
     path: /up
   resources:
@@ -129,13 +125,11 @@ proxy:
 
 environments:
   staging:
-    deploy: {replicas: 1}
     proxy: {host: staging.acme.com}
 
   production:
     deploy:
-      replicas: 5
-      autoscale: {min: 5, max: 20, cpuPercent: 70}
+      autoscale: {min: 5, max: 20}   # optional; omit to size from the fleet
 
   preview:
     deploy:
@@ -221,7 +215,7 @@ Push credentials come from the standard Docker config (`docker login`, `gcloud a
 
 ### Accessories
 
-Databases, caches, and queues sit next to the app in the same file, but they are not part of `buidl deploy`. An app deploy replaces pods many times a day. A database restart must not be a side effect of shipping a web change.
+Databases, caches, and queues sit next to the app in the same file. A first `buidl deploy` creates any accessory that is not already in the cluster. Later deploys leave existing accessories alone — including ones that have drifted — so shipping a web change cannot restart a database.
 
 ```yaml
 accessories:
@@ -237,7 +231,7 @@ Each accessory becomes a StatefulSet plus a headless Service. Inside the namespa
 
 ```sh
 buidl accessory plan       # what would change, and what that would restart
-buidl accessory apply      # prompts before anything that restarts a pod
+buidl accessory apply      # reconcile; prompts before anything that restarts a pod
 ```
 
 Accessory images are not digest-pinned (buidl did not build them). They are never deleted: removing one from `buidl.yaml` stops managing it. You delete the StatefulSet and volume yourself.
@@ -275,9 +269,9 @@ infra:
     disable: [traefik]
   addons:
     buildkit: true
-    certManager: true
-    certManagerEmail: ops@acme.com
-    metricsServer: true
+    certManagerEmail: ops@acme.com   # enables cert-manager when proxy.ssl is set
+    # metricsServer is turned on automatically when deploy.autoscale is set
+    # and the distribution does not already bundle it (k3s does).
   servers:
     - {host: 203.0.113.1, role: control-plane, privateIP: 10.0.0.1}
     - {host: 203.0.113.2, role: control-plane, privateIP: 10.0.0.2}
@@ -446,9 +440,9 @@ Output is plain in CI, colored on a terminal, or newline-delimited JSON with `-o
 
 - A BuildKit endpoint, unless `build.driver: prebuilt`. Discovery order: `build.addr`, `$BUILDKIT_HOST`, a rootless socket, `/run/buildkit/buildkitd.sock`, then a Docker/Podman/nerdctl container named `buildkitd` (or any running `moby/buildkit`, including a Buildx builder). If none of those exist, buidl creates `moby/buildkit:v0.25.1` as `buildkitd`.
 - Kubernetes 1.30+, for server-side apply and `preStop.sleep`.
-- cert-manager if `proxy.ssl: true`.
+- cert-manager if `proxy.ssl: true`. Set `infra.addons.certManagerEmail` and buidl installs it.
 - An ingress controller if `proxy.host` is set.
-- metrics-server if `deploy.autoscale` is set.
+- metrics-server if `deploy.autoscale` is set. buidl installs it on RKE2, or when k3s's bundled copy has been disabled.
 - For public TLS with an AAAA record: 80 and 443 reachable on IPv6. Let's Encrypt validates over IPv6 first.
 
 Writes use server-side apply with field manager `buidl`. Per app and environment that is a `ServiceAccount`, `Deployment`, `Service`, and optionally `Secret`, `Ingress`, `HorizontalPodAutoscaler`, `PodDisruptionBudget`, `Namespace`. Objects get `app.kubernetes.io/*` labels and `buidl.dev/*` annotations (release, digest, commit, actor, timestamp).

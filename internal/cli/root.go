@@ -73,7 +73,7 @@ immutable, digest-pinned releases.
 Every deploy is a release you can inspect, promote, and roll back:
 
   buidl init                        detect the project and write buidl.yaml
-  buidl deploy -e staging           build, push, and roll out
+  buidl deploy                      build, push, and roll out (staging by default)
   buidl plan -e production          show exactly what would change
   buidl promote --from staging --to production
                                     deploy staging's exact image to production

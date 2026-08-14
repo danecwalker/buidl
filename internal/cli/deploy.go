@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/danecwalker/buidl/internal/cluster"
 	"github.com/danecwalker/buidl/internal/config"
 	"github.com/danecwalker/buidl/internal/deploy"
+	"github.com/danecwalker/buidl/internal/deploy/kubernetes"
 	"github.com/danecwalker/buidl/internal/gitinfo"
 	"github.com/danecwalker/buidl/internal/hooks"
 )
@@ -110,7 +112,7 @@ The rollout is gated on health checks: deploy only succeeds once the new release
 is actually serving. That makes it safe to use as a CI gate.
 
 Examples:
-  buidl deploy -e staging
+  buidl deploy
   buidl deploy -e production --auto-rollback
   buidl deploy -e production --skip-cluster
   buidl deploy -e production --skip-build --digest sha256:abc...`,
@@ -249,6 +251,12 @@ Examples:
 
 			a.log.Step("Preflight checks")
 			if err := target.Preflight(ctx, req); err != nil {
+				return err
+			}
+
+			// Create accessories that are not in the cluster yet. Existing ones
+			// are left alone so a later deploy cannot restart a database.
+			if err := ensureMissingAccessories(ctx, target, req); err != nil {
 				return err
 			}
 
@@ -718,6 +726,16 @@ Examples:
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the production confirmation prompt")
 
 	return cmd
+}
+
+// ensureMissingAccessories creates accessory objects that are not in the
+// cluster. Other backends have no accessories; a type-assert miss is a no-op.
+func ensureMissingAccessories(ctx context.Context, target deploy.Target, req deploy.Request) error {
+	kt, ok := target.(*kubernetes.Target)
+	if !ok {
+		return nil
+	}
+	return kt.EnsureMissingAccessories(ctx, req)
 }
 
 // shortDigest abbreviates a digest for display.

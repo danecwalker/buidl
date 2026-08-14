@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -50,6 +51,8 @@ const (
 
 // Render builds the full desired state for a release.
 func (t *Target) Render(req deploy.Request) ([]Object, error) {
+	t.resolveScale(context.Background())
+
 	cfg := req.Config
 	rel := req.Release
 
@@ -117,6 +120,11 @@ func (t *Target) Render(req deploy.Request) ([]Object, error) {
 }
 
 func replicas(cfg *config.Config) int32 {
+	if cfg.Deploy.Autoscale != nil && cfg.Deploy.Autoscale.Min > 0 {
+		// PDB and topology spread should track the HPA floor, not the static
+		// replica field (which is omitted so we do not fight the HPA).
+		return cfg.Deploy.Autoscale.Min
+	}
 	if cfg.Deploy.Replicas == nil {
 		return 1
 	}
