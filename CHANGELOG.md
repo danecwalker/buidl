@@ -11,6 +11,8 @@ do about them.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-08-14
+
 ### Changed
 
 - `registry.createPullSecret` now defaults to true when omitted and
@@ -224,7 +226,8 @@ First tagged release.
   control plane at a time. It does **not** cordon and drain first, so pods are
   restarted rather than gracefully evicted.
 
-[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/danecwalker/buidl/releases/tag/v0.2.2
 [0.2.1]: https://github.com/danecwalker/buidl/releases/tag/v0.2.1
 [0.2.0]: https://github.com/danecwalker/buidl/releases/tag/v0.2.0
 [0.1.8]: https://github.com/danecwalker/buidl/releases/tag/v0.1.8
