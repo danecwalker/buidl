@@ -413,9 +413,11 @@ func TestInstallScriptPathHintWhenLinkFails(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(linkDir, 0o755) })
 
+	// Do not append the process PATH: GitHub-hosted runners have
+	// passwordless sudo, and a leaked sudo would write the 0555 link dir.
 	cmd := exec.Command("bash", installScript(t))
 	cmd.Env = []string{
-		"PATH=" + linkDir + string(os.PathListSeparator) + hideSudoPath(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"PATH=" + linkDir + string(os.PathListSeparator) + hideSudoPath(t),
 		"HOME=" + home,
 		"TMPDIR=" + t.TempDir(),
 		"BUIDL_BASE_URL=" + srv.URL,
