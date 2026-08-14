@@ -72,7 +72,7 @@ app: web
 image: ghcr.io/acme/web
 ```
 
-That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, a `/up` readiness probe, a rolling update with `maxUnavailable: 0`, a non-root pod with all capabilities dropped, and a namespace named after the app. Set `replicas` to pin a static count. Preview environments stay at one replica.
+That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, `/livez` `/readyz` `/startupz` probes, a rolling update with `maxUnavailable: 0`, a non-root pod with all capabilities dropped, and a namespace named after the app. Set `replicas` to pin a static count. Preview environments stay at one replica.
 
 A more complete file:
 
@@ -93,7 +93,8 @@ deploy:
   target: kubernetes
   port: 3000
   healthcheck:
-    path: /up
+    # defaults: /readyz, /livez, /startupz
+    # path: /up   # one endpoint for all three (Rails/Kamal)
   resources:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {memory: 512Mi}
@@ -163,6 +164,36 @@ A preview environment is disposable. `buidl destroy -e preview` deletes its name
 
 `destroy --stale 7d` is the backstop for a missed close event: it deletes preview namespaces older than the duration. Long-lived environments (staging, production) keep their namespace and any accessories; only the app objects are removed, and production also requires `--force`.
 
+### Health checks
+
+Your app should serve three HTTP endpoints. They are not interchangeable. A deploy succeeds only after readiness passes.
+
+**`GET /startupz` — has this process finished booting?**
+
+Kubernetes will not run the other two until this succeeds. Return 200 once the listen loop is up. A slow migration or cache warm belongs here, not on liveness: a slow boot is not a deadlock.
+
+**`GET /readyz` — can this instance accept traffic?**
+
+The rollout waits on this. Return 200 only when you can serve a real request, including required backends (a Postgres ping). Return 503 to take yourself out of the load balancer without being restarted.
+
+**`GET /livez` — is this process still making progress?**
+
+A failure restarts the container. Keep it cheap: if the process is running, return 200. Do not check Postgres. A database blip would restart every replica at once.
+
+HTTP 200–399 is success. Return a tiny body (`ok`). Probes hit the container's named `http` port.
+
+If you already have one endpoint (Rails `/up`, Kamal), point all three at it:
+
+```yaml
+deploy:
+  healthcheck:
+    path: /up
+```
+
+Override a single probe with `readiness`, `liveness`, or `startup`. Workers set `command` instead of HTTP paths. buidl does not guess another path if these fail: a timed-out deploy names the configured readiness URL.
+
+Postgres and Redis accessories get `pg_isready` / `redis-cli ping` with the same timing split: a frequent startup probe, a stricter readiness check, and a more forgiving liveness check.
+
 ### Secrets
 
 `env.secret` lists names only. Values are resolved at deploy time, lowest precedence first:
@@ -230,7 +261,7 @@ accessories:
 
 An explicit `image` / `storage` still wins. Untyped accessories with a full spec keep working.
 
-Each accessory becomes a StatefulSet plus a headless Service. Inside the namespace, `postgres` resolves as `<app>-postgres`.
+Each accessory becomes a StatefulSet plus a headless Service. Inside the namespace, `postgres` resolves as `<app>-postgres`. Typed (or well-known) Postgres and Redis images get exec probes so a first boot is covered by startup rather than a hair-trigger liveness restart.
 
 ```sh
 buidl accessory plan       # what would change, and what that would restart

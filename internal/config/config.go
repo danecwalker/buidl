@@ -184,17 +184,27 @@ type Kubernetes struct {
 	Ephemeral *bool `yaml:"ephemeral,omitempty"`
 }
 
-// Healthcheck drives both the readiness probe and the rollout gate. A release
-// is only considered live once this passes, which is what makes deploys
-// zero-downtime.
+// Healthcheck drives the Kubernetes probes and the rollout gate. A release is
+// only considered live once the readiness probe passes.
+//
+// Defaults follow the Kubernetes API convention: /readyz gates traffic,
+// /livez restarts a wedged process, /startupz covers a slow boot. Set Path to
+// use one endpoint for all three (Rails /up, Kamal).
 type Healthcheck struct {
-	Path                string `yaml:"path"`
-	Port                int32  `yaml:"port"`
-	InitialDelaySeconds int32  `yaml:"initialDelaySeconds"`
-	PeriodSeconds       int32  `yaml:"periodSeconds"`
-	TimeoutSeconds      int32  `yaml:"timeoutSeconds"`
-	FailureThreshold    int32  `yaml:"failureThreshold"`
-	// Command, when set, replaces the HTTP probe with an exec probe. Use for
+	// Path, if set, is used for readiness, liveness, and startup unless those
+	// fields override it.
+	Path      string `yaml:"path"`
+	Readiness string `yaml:"readiness"`
+	Liveness  string `yaml:"liveness"`
+	Startup   string `yaml:"startup"`
+	Port      int32  `yaml:"port"`
+
+	InitialDelaySeconds int32 `yaml:"initialDelaySeconds"`
+	PeriodSeconds       int32 `yaml:"periodSeconds"`
+	TimeoutSeconds      int32 `yaml:"timeoutSeconds"`
+	FailureThreshold    int32 `yaml:"failureThreshold"`
+
+	// Command, when set, replaces the HTTP probes with an exec probe. Use for
 	// workers and other non-HTTP roles.
 	Command []string `yaml:"command"`
 }

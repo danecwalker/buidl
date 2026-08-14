@@ -35,8 +35,6 @@ deploy:
   # cert-manager and the app.
   replicas: 1
 
-  healthcheck:
-    path: /up
 
   resources:
     requests: {cpu: 25m, memory: 32Mi}

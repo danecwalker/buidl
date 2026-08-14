@@ -495,6 +495,92 @@ func TestAccessoryContainerDetails(t *testing.T) {
 	}
 }
 
+func TestAccessoryProbes(t *testing.T) {
+	target, req := accessoryRequest(t, accessoryBase)
+	objs, err := target.RenderAccessories(req)
+	if err != nil {
+		t.Fatalf("RenderAccessories: %v", err)
+	}
+
+	pg := findNamed(objs, "StatefulSet", "web-postgres").Object.(*appsv1.StatefulSet).Spec.Template.Spec.Containers[0]
+	if pg.ReadinessProbe == nil || pg.LivenessProbe == nil || pg.StartupProbe == nil {
+		t.Fatal("postgres accessory should get startup, readiness, and liveness probes")
+	}
+	for _, p := range []*corev1.Probe{pg.ReadinessProbe, pg.LivenessProbe, pg.StartupProbe} {
+		if p.Exec == nil {
+			t.Fatal("postgres probes must be exec, not HTTP")
+		}
+		got := strings.Join(p.Exec.Command, " ")
+		if got != "pg_isready -U postgres" {
+			t.Errorf("postgres probe = %q, want pg_isready -U postgres", got)
+		}
+	}
+	if pg.LivenessProbe.PeriodSeconds <= pg.ReadinessProbe.PeriodSeconds {
+		t.Error("postgres liveness should be more forgiving than readiness")
+	}
+	if pg.StartupProbe.PeriodSeconds >= pg.ReadinessProbe.PeriodSeconds {
+		t.Error("postgres startup should poll more frequently than readiness")
+	}
+	if pg.StartupProbe.TimeoutSeconds > pg.StartupProbe.PeriodSeconds {
+		t.Errorf("postgres startup timeout (%d) must not exceed period (%d)",
+			pg.StartupProbe.TimeoutSeconds, pg.StartupProbe.PeriodSeconds)
+	}
+
+	redis := findNamed(objs, "StatefulSet", "web-redis").Object.(*appsv1.StatefulSet).Spec.Template.Spec.Containers[0]
+	if redis.ReadinessProbe == nil || redis.ReadinessProbe.Exec == nil {
+		t.Fatal("redis accessory should get an exec probe")
+	}
+	if got := strings.Join(redis.ReadinessProbe.Exec.Command, " "); got != "redis-cli ping" {
+		t.Errorf("redis probe = %q, want redis-cli ping", got)
+	}
+}
+
+func TestAccessoryProbeHonorsPostgresUser(t *testing.T) {
+	target, req := accessoryRequest(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  kubernetes: {namespace: acme}
+accessories:
+  db:
+    type: postgres
+    env:
+      clear: {POSTGRES_USER: appuser}
+      secret: [POSTGRES_PASSWORD]
+`)
+	req.Secrets["POSTGRES_PASSWORD"] = "hunter2-do-not-leak"
+	objs, err := target.RenderAccessories(req)
+	if err != nil {
+		t.Fatalf("RenderAccessories: %v", err)
+	}
+	c := findNamed(objs, "StatefulSet", "web-db").Object.(*appsv1.StatefulSet).Spec.Template.Spec.Containers[0]
+	got := strings.Join(c.ReadinessProbe.Exec.Command, " ")
+	if got != "pg_isready -U appuser" {
+		t.Errorf("probe = %q, want pg_isready -U appuser", got)
+	}
+}
+
+func TestUnknownAccessoryHasNoProbes(t *testing.T) {
+	target, req := accessoryRequest(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  kubernetes: {namespace: acme}
+accessories:
+  minio:
+    image: minio/minio
+    port: 9000
+`)
+	objs, err := target.RenderAccessories(req)
+	if err != nil {
+		t.Fatalf("RenderAccessories: %v", err)
+	}
+	c := findNamed(objs, "StatefulSet", "web-minio").Object.(*appsv1.StatefulSet).Spec.Template.Spec.Containers[0]
+	if c.ReadinessProbe != nil || c.LivenessProbe != nil || c.StartupProbe != nil {
+		t.Error("an unknown accessory image must not get invented probes")
+	}
+}
+
 func TestNoAccessoriesRendersNothing(t *testing.T) {
 	target, req := accessoryRequest(t, renderBase)
 
@@ -622,6 +708,12 @@ func TestAccessoryImpactIsPhrasedForStatefulWorkloads(t *testing.T) {
 			name:   "secret change restarts",
 			action: deploy.ActionUpdate,
 			fields: []deploy.FieldChange{{Field: "secret values"}},
+			want:   "restarts the accessory",
+		},
+		{
+			name:   "probe change restarts",
+			action: deploy.ActionUpdate,
+			fields: []deploy.FieldChange{{Field: "readiness exec", From: "pg_isready -U postgres", To: "pg_isready -U appuser"}},
 			want:   "restarts the accessory",
 		},
 		{

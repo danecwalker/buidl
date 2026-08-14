@@ -7,14 +7,16 @@ import (
 // Default values applied when a field is omitted. They are chosen so that a
 // minimal four-line config produces a safe, zero-downtime production deploy.
 const (
-	DefaultPort            = int32(8080)
-	DefaultHealthcheckPath = "/up"
-	DefaultHooksPath       = ".buidl/hooks"
-	DefaultRetainReleases  = 10
-	DefaultCacheSuffix     = ":buildcache"
-	DefaultAutoscaleCPU    = int32(70)
-	DefaultRequestCPU      = "100m"
-	DefaultRequestMemory   = "128Mi"
+	DefaultPort           = int32(8080)
+	DefaultReadinessPath  = "/readyz"
+	DefaultLivenessPath   = "/livez"
+	DefaultStartupPath    = "/startupz"
+	DefaultHooksPath      = ".buidl/hooks"
+	DefaultRetainReleases = 10
+	DefaultCacheSuffix    = ":buildcache"
+	DefaultAutoscaleCPU   = int32(70)
+	DefaultRequestCPU     = "100m"
+	DefaultRequestMemory  = "128Mi"
 )
 
 // applyDefaults fills in omitted fields. It is idempotent.
@@ -72,8 +74,30 @@ func applyDefaults(c *Config) {
 	// Applied before scale defaults: an HTTP probe is how we decide whether to
 	// turn on an HPA. A worker with only an exec probe stays at one replica.
 	hc := &c.Deploy.Healthcheck
-	if hc.Path == "" && len(hc.Command) == 0 {
-		hc.Path = DefaultHealthcheckPath
+	if len(hc.Command) == 0 {
+		// path, if set, is the single-endpoint override (Rails /up, Kamal).
+		// Otherwise each Kubernetes probe gets its own z-page.
+		if hc.Path != "" {
+			if hc.Readiness == "" {
+				hc.Readiness = hc.Path
+			}
+			if hc.Liveness == "" {
+				hc.Liveness = hc.Path
+			}
+			if hc.Startup == "" {
+				hc.Startup = hc.Path
+			}
+		} else {
+			if hc.Readiness == "" {
+				hc.Readiness = DefaultReadinessPath
+			}
+			if hc.Liveness == "" {
+				hc.Liveness = DefaultLivenessPath
+			}
+			if hc.Startup == "" {
+				hc.Startup = DefaultStartupPath
+			}
+		}
 	}
 	if hc.Port == 0 {
 		hc.Port = c.Deploy.Port
@@ -228,5 +252,5 @@ func applyScaleDefaults(c *Config) {
 // isHTTPApp reports whether the healthcheck is an HTTP probe. Workers that
 // only expose an exec probe are not assumed to want traffic-based scaling.
 func isHTTPApp(c *Config) bool {
-	return c.Deploy.Healthcheck.Path != "" && len(c.Deploy.Healthcheck.Command) == 0
+	return len(c.Deploy.Healthcheck.Command) == 0
 }

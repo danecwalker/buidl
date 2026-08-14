@@ -9,7 +9,7 @@
 //
 // Switches:
 //
-//	FAIL_READINESS=1     /up returns 503 forever (tests rollout gating + auto-rollback)
+//	FAIL_READINESS=1     /readyz returns 503 forever (tests rollout gating + auto-rollback)
 //	CRASH_ON_BOOT=1      exit(1) immediately (tests CrashLoopBackOff detection)
 //	CRASH_AFTER=10s      exit(1) after a delay (tests liveness restart)
 //	BOOT_DELAY=20s       stay unready for a while (tests the startup probe)
@@ -51,8 +51,9 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleRoot)
-	mux.HandleFunc("/up", handleReady)
-	mux.HandleFunc("/healthz", handleLive)
+	mux.HandleFunc("/readyz", handleReady)
+	mux.HandleFunc("/livez", handleLive)
+	mux.HandleFunc("/startupz", handleStartup)
 	mux.HandleFunc("/crash", handleCrash)
 
 	server := &http.Server{
@@ -62,7 +63,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// Become ready only after the configured delay, so the startup probe has
+	// Become ready only after the configured delay, so /startupz has
 	// something real to wait on.
 	bootDelay := envDuration("BOOT_DELAY", 0)
 	if bootDelay > 0 {
@@ -172,6 +173,16 @@ func handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ready.Load() {
 		http.Error(w, "not ready yet", http.StatusServiceUnavailable)
+		return
+	}
+	fmt.Fprintln(w, "ok")
+}
+
+// handleStartup is the startup probe. Kubernetes will not run liveness or
+// readiness until this succeeds, so a slow boot must fail here, not on /livez.
+func handleStartup(w http.ResponseWriter, r *http.Request) {
+	if !ready.Load() {
+		http.Error(w, "still starting", http.StatusServiceUnavailable)
 		return
 	}
 	fmt.Fprintln(w, "ok")

@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/danecwalker/buidl/internal/config"
 	"github.com/danecwalker/buidl/internal/deploy"
 	"github.com/danecwalker/buidl/internal/release"
 )
@@ -314,12 +315,7 @@ func (t *Target) checkTerminalFailure(ctx context.Context, rel release.Release) 
 func (t *Target) timeoutError(name string, rel release.Release, timeout time.Duration) error {
 	// Naming the gate is the useful part: a timeout almost always means the
 	// readiness endpoint never returned success, not that the deploy was slow.
-	hint := ""
-	if path := t.cfg.Deploy.Healthcheck.Path; path != "" {
-		hint = fmt.Sprintf("\n\nThe rollout is gated on the readiness probe GET %s:%d.\n"+
-			"An instance that stays unready means that endpoint is not returning 2xx.",
-			path, t.cfg.Deploy.Healthcheck.Port)
-	}
+	hint := probeTimeoutHint(t.cfg)
 
 	re := &rolloutError{
 		message: fmt.Sprintf("deploy timed out after %s waiting for %s to become healthy%s", timeout, name, hint),
@@ -348,6 +344,34 @@ func (t *Target) timeoutError(name string, rel release.Release, timeout time.Dur
 	}
 
 	return re
+}
+
+// probeTimeoutHint names the configured probe paths so a timed-out deploy
+// tells the user which endpoints to implement, instead of guessing another.
+func probeTimeoutHint(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	hc := cfg.Deploy.Healthcheck
+	if len(hc.Command) > 0 {
+		return fmt.Sprintf("\n\nThe rollout is gated on the exec probe %s.\n"+
+			"An instance that stays unready means that command is not exiting 0.",
+			strings.Join(hc.Command, " "))
+	}
+	ready := hc.Readiness
+	if ready == "" {
+		return ""
+	}
+	if hc.Liveness == ready && hc.Startup == ready {
+		return fmt.Sprintf("\n\nThe rollout is gated on GET %s.\n"+
+			"That path must return 2xx once the app can serve traffic.\n"+
+			"Implement it, or set deploy.healthcheck.path to an endpoint you already serve.",
+			ready)
+	}
+	return fmt.Sprintf("\n\nThe rollout is gated on GET %s (startup %s, liveness %s).\n"+
+		"Those paths must return 2xx. Implement them, or set deploy.healthcheck.path\n"+
+		"to an endpoint you already serve.",
+		ready, hc.Startup, hc.Liveness)
 }
 
 // releasePods lists the pods belonging to one release.
@@ -443,6 +467,12 @@ func podStatus(pod corev1.Pod) deploy.PodStatus {
 	// always means the readiness probe is not passing.
 	if ps.Message == "" && pod.Status.Phase == corev1.PodRunning && !ps.Ready {
 		ps.Message = "running but not ready: readiness probe has not passed"
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Started != nil && !*cs.Started {
+				ps.Message = "running but not started: startup probe has not passed"
+				break
+			}
+		}
 	}
 
 	return ps

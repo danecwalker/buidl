@@ -208,7 +208,7 @@ FROM nginxinc/nginx-unprivileged:alpine AS runtime
 # The unprivileged nginx image already runs as uid 101 and listens on 8080.
 COPY --from=build /app/dist /usr/share/nginx/html
 # SPA routing: unknown paths must fall through to index.html.
-RUN printf 'server {\n  listen 8080;\n  root /usr/share/nginx/html;\n  location / {\n    try_files $uri $uri/ /index.html;\n  }\n  location /up { return 200 "ok"; }\n}\n' > /etc/nginx/conf.d/default.conf
+RUN printf 'server {\n  listen 8080;\n  root /usr/share/nginx/html;\n  location / {\n    try_files $uri $uri/ /index.html;\n  }\n  location /livez { return 200 "ok"; }\n  location /readyz { return 200 "ok"; }\n  location /startupz { return 200 "ok"; }\n}\n' > /etc/nginx/conf.d/default.conf
 EXPOSE 8080
 # Stated numerically so Kubernetes can verify it against runAsNonRoot.
 USER 101:101
@@ -435,7 +435,7 @@ func staticDockerfile(d Detection) string {
 FROM nginxinc/nginx-unprivileged:alpine AS runtime
 # This image runs as uid 101 and listens on 8080 without needing root.
 COPY . /usr/share/nginx/html
-RUN printf 'server {\n  listen 8080;\n  root /usr/share/nginx/html;\n  location / {\n    try_files $uri $uri/ /index.html;\n  }\n  location /up { return 200 "ok"; }\n}\n' > /etc/nginx/conf.d/default.conf
+RUN printf 'server {\n  listen 8080;\n  root /usr/share/nginx/html;\n  location / {\n    try_files $uri $uri/ /index.html;\n  }\n  location /livez { return 200 "ok"; }\n  location /readyz { return 200 "ok"; }\n  location /startupz { return 200 "ok"; }\n}\n' > /etc/nginx/conf.d/default.conf
 EXPOSE 8080
 # Stated numerically so Kubernetes can verify it against runAsNonRoot.
 USER 101:101

@@ -236,8 +236,13 @@ func TestDetectUnknownStillUsable(t *testing.T) {
 		t.Errorf("Kind = %q, want unknown", d.Kind)
 	}
 	// Even with nothing recognized, the result must be a valid starting point.
-	if d.Name == "" || d.Port == 0 || d.HealthPath == "" {
+	// HealthPath stays empty so the platform default (/livez, /readyz, /startupz)
+	// applies unless a framework is known to expose something else.
+	if d.Name == "" || d.Port == 0 {
 		t.Errorf("unknown detection should still yield defaults: %+v", d)
+	}
+	if d.HealthPath != "" {
+		t.Errorf("HealthPath = %q, want empty for unknown stacks", d.HealthPath)
 	}
 }
 

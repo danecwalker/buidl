@@ -202,10 +202,17 @@ deploy:
   # static count, or set autoscale.min / autoscale.max to take over the bounds.
 
   healthcheck:
-    # The rollout is gated on this endpoint, so it must return 200 only when the
-    # app is genuinely ready to serve.
-    path: %s
-
+    # /startupz must pass before liveness or readiness run.
+    # /readyz gates traffic and the rollout. Return 200 only when the
+    # app can serve (dependencies included).
+    # /livez restarts a wedged process. Keep it cheap — do not check
+    # Postgres here, or a blip kills the pod.
+    # Set path: /up to use one endpoint for all three (Rails/Kamal).
+`, config.SchemaVersion, d.Name, image, dockerfilePath(d), d.Port)
+	if d.HealthPath != "" {
+		fmt.Fprintf(&b, "    path: %s\n", d.HealthPath)
+	}
+	fmt.Fprintf(&b, `
   resources:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {memory: 512Mi}
@@ -222,7 +229,7 @@ env:
   # Names only — values are read from the environment or .buidl/secrets at
   # deploy time and are never written to this file.
   secret: []
-`, config.SchemaVersion, d.Name, image, dockerfilePath(d), d.Port, healthPath(d))
+`)
 
 	fmt.Fprintf(&b, `
 # Uncomment and list the machines buidl should turn into a cluster.
@@ -286,13 +293,6 @@ func dockerfilePath(d project.Detection) string {
 		return d.DockerfilePath
 	}
 	return "Dockerfile"
-}
-
-func healthPath(d project.Detection) string {
-	if d.HealthPath != "" {
-		return d.HealthPath
-	}
-	return "/up"
 }
 
 // scaffoldSecrets creates the .buidl directory: a committed declaration file, a
