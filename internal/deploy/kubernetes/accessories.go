@@ -72,6 +72,7 @@ func (t *Target) RenderAccessories(req deploy.Request) ([]Object, error) {
 	sort.Strings(names)
 
 	var objs []Object
+	managedPull := t.managedPullSecret(cfg)
 	for _, name := range names {
 		acc := cfg.Accessories[name]
 
@@ -85,7 +86,7 @@ func (t *Target) RenderAccessories(req deploy.Request) ([]Object, error) {
 
 		objs = append(objs, t.accessoryService(cfg, req.Release, name, acc))
 
-		set, err := t.accessoryStatefulSet(cfg, req.Release, name, acc, checksum)
+		set, err := t.accessoryStatefulSet(cfg, req.Release, name, acc, checksum, managedPull)
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +346,7 @@ func (t *Target) accessoryService(cfg *config.Config, rel release.Release, name 
 // A StatefulSet rather than a Deployment because both properties it provides are
 // load-bearing here: a stable network identity to address the instance by, and a
 // volume that is re-attached to the replacement pod rather than recreated empty.
-func (t *Target) accessoryStatefulSet(cfg *config.Config, rel release.Release, name string, acc config.Accessory, secretChecksum string) (*Object, error) {
+func (t *Target) accessoryStatefulSet(cfg *config.Config, rel release.Release, name string, acc config.Accessory, secretChecksum string, managedPull bool) (*Object, error) {
 	objectName := accessoryName(cfg, name)
 
 	container, err := accessoryContainer(cfg, name, acc)
@@ -375,7 +376,7 @@ func (t *Target) accessoryStatefulSet(cfg *config.Config, rel release.Release, n
 				NodeSelector: cfg.Deploy.Kubernetes.NodeSelector,
 				// The app's pull secrets cover the accessory too: a private mirror
 				// of postgres:16 needs the same credential the app image does.
-				ImagePullSecrets: pullSecretRefs(cfg),
+				ImagePullSecrets: pullSecretRefs(cfg, managedPull),
 			},
 		},
 	}

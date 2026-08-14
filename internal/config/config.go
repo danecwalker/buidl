@@ -88,9 +88,31 @@ type Registry struct {
 	// sourcing credentials from Username/Password when set and otherwise from the
 	// same local Docker config it pushes with.
 	//
-	// This copies a registry credential from this machine into the cluster, which
-	// is a real trust decision — hence opt-in rather than automatic.
-	CreatePullSecret bool `yaml:"createPullSecret"`
+	// A pointer so "omitted" (default on) is distinct from an explicit false.
+	// Copying a laptop credential into the cluster is a real trust decision;
+	// the default is on because the alternative is a first deploy that builds,
+	// pushes, then dies on ErrImagePull. Set false to keep credentials off
+	// the cluster (a public image, or a node-level registries.yaml).
+	CreatePullSecret *bool `yaml:"createPullSecret,omitempty"`
+
+	// pullSecretDefaulted is set by applyDefaults when CreatePullSecret was
+	// filled in. A missing local credential then skips the secret instead of
+	// failing, so `buidl manifest` and a public image still work without
+	// docker login. An explicit true still fails, because the user asked.
+	pullSecretDefaulted bool
+}
+
+// ManagesPullSecret reports whether buidl should create and attach its own
+// imagePullSecret. After applyDefaults this is true unless the user set
+// createPullSecret: false or named an existing pullSecret instead.
+func (r Registry) ManagesPullSecret() bool {
+	return r.CreatePullSecret != nil && *r.CreatePullSecret
+}
+
+// PullSecretOptional is true when createPullSecret was defaulted on. A
+// missing local credential then skips the secret instead of failing.
+func (r Registry) PullSecretOptional() bool {
+	return r.pullSecretDefaulted
 }
 
 // BuildDriver selects how images are produced.

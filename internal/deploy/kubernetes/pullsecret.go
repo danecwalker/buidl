@@ -36,15 +36,36 @@ func pullSecretName(app string) string {
 //
 // An explicitly named secret and a buidl-managed one can coexist: a cluster may
 // hold credentials for a base-image registry while buidl manages the app's own.
-func pullSecretRefs(cfg *config.Config) []corev1.LocalObjectReference {
+func pullSecretRefs(cfg *config.Config, managed bool) []corev1.LocalObjectReference {
 	var refs []corev1.LocalObjectReference
 	if cfg.Registry.PullSecret != "" {
 		refs = append(refs, corev1.LocalObjectReference{Name: cfg.Registry.PullSecret})
 	}
-	if cfg.Registry.CreatePullSecret {
+	if managed {
 		refs = append(refs, corev1.LocalObjectReference{Name: pullSecretName(cfg.App)})
 	}
 	return refs
+}
+
+// managedPullSecret reports whether a buidl-managed imagePullSecret will
+// actually be created. A defaulted createPullSecret with no local credential
+// is skipped so a public image and `buidl manifest` still work.
+func (t *Target) managedPullSecret(cfg *config.Config) bool {
+	if !cfg.Registry.ManagesPullSecret() {
+		return false
+	}
+	if !cfg.Registry.PullSecretOptional() {
+		return true
+	}
+	host, err := registryHostFor(cfg)
+	if err != nil {
+		return false
+	}
+	if _, _, err := resolveRegistryCredential(cfg, host); err != nil {
+		t.log.Detail("no local credentials for %s; skipping imagePullSecret", host)
+		return false
+	}
+	return true
 }
 
 // pullSecret renders the registry credential Secret.
@@ -61,6 +82,10 @@ func (t *Target) pullSecret(cfg *config.Config, rel release.Release) (*Object, e
 
 	username, password, err := resolveRegistryCredential(cfg, registryHost)
 	if err != nil {
+		if cfg.Registry.PullSecretOptional() {
+			t.log.Detail("no local credentials for %s; skipping imagePullSecret", registryHost)
+			return nil, nil
+		}
 		return nil, err
 	}
 

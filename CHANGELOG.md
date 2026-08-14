@@ -11,6 +11,18 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- `registry.createPullSecret` now defaults to true when omitted and
+  `registry.pullSecret` is unset, so `buidl init` then `buidl deploy` can
+  pull a private GHCR image without extra YAML. The same credential used
+  to push is copied into the cluster as an imagePullSecret. Set
+  `createPullSecret: false` to keep credentials off the cluster (a public
+  image, or a node-level registry config). `buidl init` writes the
+  setting so the generated file shows the default. If the default is on
+  and no local credential exists, the secret is skipped so a public
+  image and `buidl manifest` still work.
+
 ## [0.2.1] — 2026-08-14
 
 ### Changed

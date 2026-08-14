@@ -68,10 +68,13 @@ func remedyFor(waiting *corev1.ContainerStateWaiting, pod corev1.Pod) string {
 	if isUnauthorizedPull(waiting) && len(pod.Spec.ImagePullSecrets) == 0 {
 		return "\n\nThe image was pushed successfully, so this is a *pull* credential problem:\n" +
 			"the cluster has no imagePullSecret and cannot authenticate to the registry.\n\n" +
-			"hint: let buidl manage it:\n" +
-			"  registry:\n    createPullSecret: true\n" +
+			"hint: log in so buidl can copy the credential into the cluster:\n" +
+			"  docker login <registry>\n" +
+			"then redeploy. Or set them in the file:\n" +
+			"  registry:\n    username: your-username\n    password: ${REGISTRY_TOKEN}\n" +
 			"or reference a secret you already maintain:\n" +
-			"  registry:\n    pullSecret: my-registry-creds"
+			"  registry:\n    pullSecret: my-registry-creds\n" +
+			"If you set registry.createPullSecret: false, turn it back on."
 	}
 
 	return ""
