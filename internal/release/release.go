@@ -30,6 +30,9 @@ const (
 	// Service selector across values of this label.
 	LabelRelease = "buidl.dev/release"
 	LabelEnv     = "buidl.dev/environment"
+	// LabelEphemeral marks a namespace as a disposable preview so a stale
+	// sweep can find it without reconstructing the slug.
+	LabelEphemeral = "buidl.dev/ephemeral"
 
 	AnnotationRelease   = "buidl.dev/release"
 	AnnotationDigest    = "buidl.dev/image-digest"

@@ -106,6 +106,16 @@ func Validate(c *Config) error {
 	if ns := c.Deploy.Kubernetes.Namespace; ns != "" && !dnsLabel.MatchString(ns) {
 		add("`deploy.kubernetes.namespace` must be a valid DNS label (got %q)", ns)
 	}
+	if c.Deploy.Kubernetes.Ephemeral != nil && *c.Deploy.Kubernetes.Ephemeral {
+		// An ephemeral production environment would make `destroy` delete the
+		// live namespace. Catch that at load time, not at teardown.
+		if ProductionLike(c.Environment) {
+			add("`deploy.kubernetes.ephemeral` cannot be true for environment %q", c.Environment)
+		}
+		if ns := c.Deploy.Kubernetes.Namespace; ProtectedNamespace(ns) {
+			add("`deploy.kubernetes.ephemeral` cannot target protected namespace %q", ns)
+		}
+	}
 
 	// --- healthcheck ---
 	hc := c.Deploy.Healthcheck

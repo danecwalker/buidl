@@ -11,6 +11,17 @@ do about them.
 
 ## [Unreleased]
 
+### Added
+
+- **`buidl destroy`** tears down an environment. Preview namespaces (slug-derived,
+  `createNamespace: true`, or `deploy.kubernetes.ephemeral: true`) are deleted
+  wholesale. Staging and production lose only the app objects; accessories and
+  the namespace stay. Production also requires `--force`. `--dry-run` prints the
+  plan. `--stale 7d` sweeps leaked preview namespaces.
+- The workflow `buidl init` writes now listens for `pull_request` `closed` and
+  runs `buidl destroy -e preview --yes`, so a merge (or a close without merge)
+  does not leave the preview namespace behind.
+
 ## [0.1.3] — 2026-08-14
 
 ### Changed

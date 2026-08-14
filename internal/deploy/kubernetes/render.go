@@ -147,10 +147,16 @@ func (t *Target) objectMeta(cfg *config.Config, rel release.Release, name string
 }
 
 func (t *Target) namespace(cfg *config.Config, rel release.Release) Object {
+	labels := rel.Labels(cfg.App)
+	if deploy.IsEphemeral(cfg) {
+		// So a stale sweep can find preview namespaces without reconstructing
+		// the slug that originally created them.
+		labels[release.LabelEphemeral] = "true"
+	}
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   t.Namespace,
-			Labels: rel.Labels(cfg.App),
+			Labels: labels,
 		},
 	}
 	return Object{

@@ -8,6 +8,7 @@ buidl plan    -e staging
 buidl deploy  -e staging
 buidl promote --from staging --to production
 buidl rollback -e production
+buidl destroy -e preview
 ```
 
 `plan` and `deploy` can also install k3s or RKE2 on machines you already have. Creating those machines is not buidl's job. Use OpenTofu, Terraform, Ansible, or a cloud console, then list the hosts in `buidl.yaml`.
@@ -141,6 +142,7 @@ environments:
       kubernetes:
         namespace: web-preview-${BUIDL_SLUG}
         createNamespace: true
+        ephemeral: true
     proxy:
       host: ${BUIDL_SLUG}.preview.acme.com
 ```
@@ -165,6 +167,10 @@ buidl sets:
 | `BUIDL_VERSION` | buidl version |
 
 `BUIDL_SLUG` is how preview environments get a hostname and namespace without extra config.
+
+A preview environment is disposable. `buidl destroy -e preview` deletes its namespace. The generated GitHub workflow does that when the pull request closes (merge or not). Staging is a separate deploy from `main`; the preview objects are never moved into staging.
+
+`destroy --stale 7d` is the backstop for a missed close event: it deletes preview namespaces older than the duration. Long-lived environments (staging, production) keep their namespace and any accessories; only the app objects are removed, and production also requires `--force`.
 
 ### Secrets
 
@@ -406,6 +412,7 @@ Unchanged objects are listed too. `--detailed` adds the full YAML diff. Secret c
 | `plan` | dry-run the cluster and the app |
 | `promote` | deploy one environment's exact digest to another |
 | `rollback` | previous release, or `--to <id>` |
+| `destroy` | tear down an environment (preview namespace, or app objects) |
 | `status` | live release, health, instances |
 | `releases` | history from cluster revisions |
 | `logs` | stream logs (`-F` to follow) |
@@ -420,6 +427,8 @@ Global flags: `-e/--env`, `-f/--config`, `-o/--output {auto,pretty,plain,json}`,
 
 Useful deploy flags: `--auto-rollback`, `--skip-cluster`, `--skip-build --digest sha256:...`, `--allow-dirty`, `--yes`.
 
+Useful destroy flags: `--yes`, `--dry-run`, `--stale 7d`, `--force` (production).
+
 Exit codes: `0` success, `1` failure, `2` changes detected (`plan --detailed-exitcode`), `3` invalid configuration.
 
 ## CI
@@ -429,6 +438,7 @@ Output is plain in CI, colored on a terminal, or newline-delimited JSON with `-o
 `buidl init` writes a workflow in this shape:
 
 - Pull request: preview environment plus a production `plan`
+- Pull request closed: `buidl destroy -e preview` deletes the preview namespace
 - Merge to main: deploy staging
 - Manual dispatch: `promote` staging's digest to production, gated on a GitHub environment
 

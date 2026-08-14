@@ -133,8 +133,8 @@ type Addons struct {
 
 // Defaults applied to the infra block.
 const (
-	DefaultSSHUser     = "root"
-	DefaultSSHPort     = 22
+	DefaultSSHUser = "root"
+	DefaultSSHPort = 22
 	// Dual-stack defaults. Pod/service IPv6 is ULA so it does not consume the
 	// host's public /64; flannel masquerades egress to the node's address.
 	DefaultClusterCIDR = "10.42.0.0/16,fd00:42::/56"

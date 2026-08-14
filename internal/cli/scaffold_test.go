@@ -28,8 +28,8 @@ func TestGithubWorkflowIsValidYAML(t *testing.T) {
 	if doc.Name == "" {
 		t.Error("workflow has no name")
 	}
-	// The three-stage shape is the point of the template.
-	for _, job := range []string{"preview", "staging", "production"} {
+	// The four-stage shape is the point of the template.
+	for _, job := range []string{"preview", "teardown", "staging", "production"} {
 		if _, ok := doc.Jobs[job]; !ok {
 			t.Errorf("workflow is missing the %q job", job)
 		}
@@ -52,6 +52,17 @@ func TestGithubWorkflowIsValidYAML(t *testing.T) {
 	// Full history is needed for buidl to record provenance.
 	if !strings.Contains(githubWorkflow, "fetch-depth: 0") {
 		t.Error("checkout should fetch full history for git provenance")
+	}
+	// Closing a PR must tear the preview down; the default pull_request types
+	// omit `closed`, so the workflow has to list it.
+	if !strings.Contains(githubWorkflow, "buidl destroy -e preview --yes") {
+		t.Error("the teardown job should destroy the preview environment")
+	}
+	if !strings.Contains(githubWorkflow, "closed") {
+		t.Error("the workflow must listen for pull_request closed so previews do not leak")
+	}
+	if !strings.Contains(githubWorkflow, "github.event.action != 'closed'") {
+		t.Error("the preview job must not run when the PR is closed")
 	}
 }
 
@@ -112,6 +123,9 @@ func TestRenderedConfigIsValid(t *testing.T) {
 			}
 			if !preview.Config.Deploy.Kubernetes.CreateNamespace {
 				t.Error("preview should create its namespace, since it is ephemeral")
+			}
+			if preview.Config.Deploy.Kubernetes.Ephemeral == nil || !*preview.Config.Deploy.Kubernetes.Ephemeral {
+				t.Error("preview should be marked ephemeral so destroy deletes the namespace")
 			}
 		})
 	}

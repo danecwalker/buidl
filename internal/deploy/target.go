@@ -294,6 +294,10 @@ type Target interface {
 	// Logs streams application logs.
 	Logs(ctx context.Context, req LogRequest) error
 
+	// Destroy tears the environment down. For an ephemeral preview that means
+	// the namespace; for a long-lived environment, only the app objects.
+	Destroy(ctx context.Context, req DestroyRequest) (*DestroyOutcome, error)
+
 	// Close releases connections.
 	Close() error
 }
