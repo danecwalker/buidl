@@ -60,6 +60,14 @@ func TestLoadMinimalAppliesDefaults(t *testing.T) {
 	if cfg.Registry.Server != "ghcr.io" {
 		t.Errorf("Registry.Server = %q, want ghcr.io (derived from image)", cfg.Registry.Server)
 	}
+	// A four-line GHCR config must be able to pull: the cluster cannot use
+	// the developer's docker login, so buidl copies it in by default.
+	if !cfg.Registry.ManagesPullSecret() {
+		t.Error("CreatePullSecret should default to true so the cluster can pull")
+	}
+	if !cfg.Registry.PullSecretOptional() {
+		t.Error("an omitted createPullSecret must be optional so missing creds skip")
+	}
 	if cfg.Build.CacheRef != "ghcr.io/acme/web:buildcache" {
 		t.Errorf("CacheRef = %q", cfg.Build.CacheRef)
 	}
@@ -108,6 +116,60 @@ func TestRegistryFromImage(t *testing.T) {
 		if got := registryFromImage(tt.image); got != tt.want {
 			t.Errorf("registryFromImage(%q) = %q, want %q", tt.image, got, tt.want)
 		}
+	}
+}
+
+func TestCreatePullSecretExplicitFalse(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+registry:
+  createPullSecret: false
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// A public image, or a node-level registries.yaml, must be able to opt out.
+	if res.Config.Registry.ManagesPullSecret() {
+		t.Error("createPullSecret: false must not be overwritten by the default")
+	}
+	if res.Config.Registry.PullSecretOptional() {
+		t.Error("an explicit false is not a defaulted pull secret")
+	}
+}
+
+func TestCreatePullSecretExplicitTrueIsRequired(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+registry:
+  createPullSecret: true
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !res.Config.Registry.ManagesPullSecret() {
+		t.Error("createPullSecret: true must stay on")
+	}
+	if res.Config.Registry.PullSecretOptional() {
+		t.Error("an explicit true must fail when credentials are missing, not skip")
+	}
+}
+
+func TestCreatePullSecretOmittedWhenPullSecretSet(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+registry:
+  pullSecret: already-managed
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// An existing secret means someone else owns the credential; do not also
+	// mint one from the local Docker config.
+	if res.Config.Registry.ManagesPullSecret() {
+		t.Error("CreatePullSecret should stay off when pullSecret is set")
 	}
 }
 

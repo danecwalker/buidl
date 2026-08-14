@@ -81,15 +81,20 @@ func (t *Target) Render(req deploy.Request) ([]Object, error) {
 
 	// The cluster needs its own credential to pull from a private registry; the
 	// developer's or CI runner's login does not reach the kubelet.
-	if cfg.Registry.CreatePullSecret {
+	managedPull := t.managedPullSecret(cfg)
+	if managedPull {
 		pull, err := t.pullSecret(cfg, rel)
 		if err != nil {
 			return nil, err
 		}
-		objs = append(objs, *pull)
+		if pull != nil {
+			objs = append(objs, *pull)
+		} else {
+			managedPull = false
+		}
 	}
 
-	dep, err := t.deployment(cfg, rel, checksum)
+	dep, err := t.deployment(cfg, rel, checksum, managedPull)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +241,7 @@ func (t *Target) secret(cfg *config.Config, rel release.Release, values map[stri
 }
 
 // deployment renders the app workload.
-func (t *Target) deployment(cfg *config.Config, rel release.Release, secretChecksum string) (*Object, error) {
+func (t *Target) deployment(cfg *config.Config, rel release.Release, secretChecksum string, managedPull bool) (*Object, error) {
 	name := t.workloadName(cfg, rel)
 
 	container, err := t.container(cfg, rel)
@@ -265,7 +270,7 @@ func (t *Target) deployment(cfg *config.Config, rel release.Release, secretCheck
 				Containers: []corev1.Container{*container},
 				// Set on the pod rather than relying on the ServiceAccount, so the
 				// reference is visible in the manifest a user reviews.
-				ImagePullSecrets:              pullSecretRefs(cfg),
+				ImagePullSecrets:              pullSecretRefs(cfg, managedPull),
 				ServiceAccountName:            t.serviceAccountName(cfg),
 				NodeSelector:                  cfg.Deploy.Kubernetes.NodeSelector,
 				TerminationGracePeriodSeconds: ptr(int64(cfg.Deploy.DrainTimeout.Or(defaultDrain).Seconds())),

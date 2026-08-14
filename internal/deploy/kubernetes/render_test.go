@@ -40,6 +40,13 @@ func testConfig(t *testing.T, yaml string) *config.Config {
 	if err != nil {
 		t.Fatalf("loading test config: %v", err)
 	}
+	// Render tests must not consult the developer's Docker keychain. The
+	// default is createPullSecret: true; unless a test is exercising that
+	// path, pin it off so a logged-in laptop cannot change the object set.
+	if !strings.Contains(yaml, "createPullSecret") && !strings.Contains(yaml, "pullSecret") {
+		off := false
+		res.Config.Registry.CreatePullSecret = &off
+	}
 	return res.Config
 }
 

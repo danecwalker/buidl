@@ -19,8 +19,9 @@ infrastructure you own. It holds or handles:
 - **Cluster-admin credentials**, fetched from a control-plane node and merged
   into your local kubeconfig.
 - **Registry credentials**, read from the standard Docker config to push images
-  and, with `registry.createPullSecret`, copied into the cluster as a pull
-  secret.
+  and, by default (`registry.createPullSecret`), copied into the cluster as a
+  pull secret. Set `createPullSecret: false` to keep that credential off the
+  cluster.
 - **Application secrets**, resolved at deploy time and written into Kubernetes
   Secrets.
 

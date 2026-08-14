@@ -124,6 +124,9 @@ func TestRenderedConfigIsValid(t *testing.T) {
 						t.Errorf("startup = %q, want %s", cfg.Deploy.Healthcheck.Startup, config.DefaultStartupPath)
 					}
 				}
+				if !cfg.Registry.ManagesPullSecret() {
+					t.Error("generated config must enable createPullSecret so the first deploy can pull")
+				}
 				if env == "preview" {
 					if cfg.Deploy.Autoscale != nil {
 						t.Error("generated preview should stay at one replica, not an HPA")
@@ -179,6 +182,23 @@ func TestRenderedConfigImpliesStaging(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "certManagerEmail:") {
 		t.Error("generated infra comments should mention certManagerEmail")
+	}
+	// Without this, init then deploy dies on ErrImagePull against GHCR.
+	if !strings.Contains(rendered, "createPullSecret: true") {
+		t.Error("generated config should enable registry.createPullSecret")
+	}
+
+	res, err := config.Load(config.LoadOptions{
+		Path:        writeTempConfig(t, rendered),
+		Environment: "staging",
+		Strict:      true,
+		Vars:        map[string]string{"BUIDL_SLUG": "example"},
+	})
+	if err != nil {
+		t.Fatalf("generated config must load: %v", err)
+	}
+	if !res.Config.Registry.ManagesPullSecret() {
+		t.Error("generated config must resolve createPullSecret to true")
 	}
 }
 

@@ -72,7 +72,7 @@ app: web
 image: ghcr.io/acme/web
 ```
 
-That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, `/livez` `/readyz` `/startupz` probes, a rolling update with `maxUnavailable: 0`, a non-root pod with all capabilities dropped, and a namespace named after the app. Set `replicas` to pin a static count. Preview environments stay at one replica.
+That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, `/livez` `/readyz` `/startupz` probes, a rolling update with `maxUnavailable: 0`, a non-root pod with all capabilities dropped, a namespace named after the app, and an imagePullSecret copied from your local Docker login so the cluster can pull the image you just pushed. Set `replicas` to pin a static count. Preview environments stay at one replica.
 
 A more complete file:
 
@@ -232,14 +232,16 @@ For secrets already in the cluster (External Secrets, Vault), use `env.secretRef
 
 buidl needs credentials to push. The cluster needs its own credentials to pull. Your local `docker login` does not reach the kubelet.
 
+`registry.createPullSecret` defaults to true, and `buidl init` writes it. The same credential BuildKit pushed with is copied into the cluster as an imagePullSecret. GHCR packages are private until you flip them, so without this the first deploy builds, pushes, then dies on `ErrImagePull`.
+
 ```yaml
 registry:
-  createPullSecret: true
+  createPullSecret: true          # the default; false keeps credentials off the cluster
   # or reference a secret you already manage:
   # pullSecret: my-registry-creds
 ```
 
-Push credentials come from the standard Docker config (`docker login`, `gcloud auth configure-docker`, `docker/login-action`). `createPullSecret` copies that credential into the cluster. It is opt-in because that is a trust decision.
+Push credentials come from the standard Docker config (`docker login`, `gcloud auth configure-docker`, `docker/login-action`). Set `createPullSecret: false` for a public image or when the nodes already have a `registries.yaml`.
 
 ### Accessories
 

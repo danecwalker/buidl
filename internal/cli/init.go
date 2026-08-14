@@ -184,6 +184,12 @@ version: %d
 app: %s
 image: %s
 
+registry:
+  # The cluster cannot use your local docker login. Copy that credential
+  # into an imagePullSecret so pods can pull the image you just pushed.
+  # Set false for a public image, or set pullSecret to use one you manage.
+  createPullSecret: true
+
 # Used when -e is omitted. Production is never implied.
 defaultEnvironment: staging
 

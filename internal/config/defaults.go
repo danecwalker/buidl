@@ -59,6 +59,16 @@ func applyDefaults(c *Config) {
 		c.Registry.Server = registryFromImage(c.Image)
 	}
 
+	// The cluster cannot use the developer's docker login. Default to copying
+	// that credential in, otherwise `buidl init` then `buidl deploy` dies on
+	// ErrImagePull against GHCR (private by default). An explicit pullSecret
+	// means someone else already manages the credential.
+	if c.Registry.CreatePullSecret == nil && c.Registry.PullSecret == "" {
+		enabled := true
+		c.Registry.CreatePullSecret = &enabled
+		c.Registry.pullSecretDefaulted = true
+	}
+
 	// --- deploy ---
 	if c.Deploy.Target == "" {
 		c.Deploy.Target = "kubernetes"
