@@ -11,6 +11,28 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `buidl env` now manages environments (alias of `environment`).
+  Variables moved to `buidl variable` (`var`, `vars`). `env list` previously
+  printed release variables and never printed secret values; that command is
+  now `variable list`.
+
+### Added
+
+- `buidl environment list|new|set|delete` writes environment overlays into
+  `buidl.yaml` and keeps the comments `init` wrote. Templates match the
+  staging / production / preview shapes from `init`. `--from` copies an
+  existing overlay. Deleting the default environment requires `--force`.
+- `buidl add --database postgres|redis` writes a typed accessory
+  (`type: postgres`) and generates secrets. `add --service --host` configures
+  this app. A second named service is an error: one app per file today.
+- `buidl variable set` / `delete` write `.buidl/secrets` and declare the name
+  under `env.secret`. `--clear` writes a non-secret into the file.
+- Accessories accept `type: postgres` or `type: redis`. Omitted image, port,
+  storage, mount path, and `POSTGRES_PASSWORD` are filled at load. A declared
+  `DATABASE_URL` / `REDIS_URL` with no value is derived from the accessory.
+
 ## [0.1.5] — 2026-08-14
 
 ### Changed

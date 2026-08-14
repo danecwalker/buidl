@@ -366,9 +366,9 @@ case_inspection() {
   assert_contains "status reports the release" "$status" "release"
   assert_contains "status lists instances" "$status" "Instances"
 
-  envlist="$(run_buidl env list -e "$ENVIRONMENT")"
-  assert_contains "env list reports the secret source" "$envlist" "DEMO_SECRET"
-  assert_not_contains "env list never prints a secret value" "$envlist" "$DEMO_SECRET"
+  envlist="$(run_buidl variable list -e "$ENVIRONMENT")"
+  assert_contains "variable list reports the secret source" "$envlist" "DEMO_SECRET"
+  assert_not_contains "variable list never prints a secret value" "$envlist" "$DEMO_SECRET"
 
   plan="$(run_buidl plan -e "$ENVIRONMENT")"
   assert_contains "plan renders a change table" "$plan" "KIND"

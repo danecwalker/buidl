@@ -190,8 +190,11 @@ func Validate(c *Config) error {
 		if !dnsLabel.MatchString(name) {
 			add("%s: accessory name must be a valid DNS label", prefix)
 		}
+		if acc.Type != "" && !SupportedAccessoryType(acc.Type) {
+			add("%s.type %q is not supported (want postgres or redis)", prefix, acc.Type)
+		}
 		if acc.Image == "" {
-			add("%s.image is required", prefix)
+			add("%s.image is required (set it, or set type: postgres or type: redis)", prefix)
 		}
 		if acc.Port != 0 && (acc.Port < 1 || acc.Port > 65535) {
 			add("%s.port must be between 1 and 65535 (got %d)", prefix, acc.Port)
@@ -290,4 +293,15 @@ func orPlaceholder(s string) string {
 		return "app"
 	}
 	return s
+}
+
+// ValidDNSLabel reports whether s is a Kubernetes DNS label (and so a legal
+// app, environment, or accessory name).
+func ValidDNSLabel(s string) bool {
+	return s != "" && len(s) <= 63 && dnsLabel.MatchString(s)
+}
+
+// ValidEnvVar reports whether s is a legal environment variable name.
+func ValidEnvVar(s string) bool {
+	return envVarName.MatchString(s)
 }

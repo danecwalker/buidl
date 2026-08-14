@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/danecwalker/buidl/internal/build"
+	"github.com/danecwalker/buidl/internal/config"
 	"github.com/danecwalker/buidl/internal/deploy"
 	"github.com/danecwalker/buidl/internal/hooks"
 	"github.com/danecwalker/buidl/internal/release"
@@ -35,6 +37,7 @@ func (a *App) resolveSecrets() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.applyAccessoryURLs(res)
 
 	for _, w := range res.Warnings {
 		a.log.Warn("%s", w)
@@ -47,7 +50,7 @@ func (a *App) resolveSecrets() (map[string]string, error) {
 				"  %s   (this environment only, gitignored)\n"+
 				"  %s   (all environments, gitignored)\n"+
 				"  %s   (committed; indirections only, e.g. %s=$PROD_%s)\n\n"+
-				"Run `buidl env list` to see where each secret resolves from.",
+				"Run `buidl variable list` to see where each secret resolves from.",
 			strings.Join(res.Missing, ", "),
 			secrets.EnvironmentFile(a.cfg.Environment),
 			secrets.DefaultFile,
@@ -68,6 +71,79 @@ func (a *App) resolveSecrets() (map[string]string, error) {
 		a.log.Detail("not deployed (undeclared in env.secret): %s", strings.Join(res.Discovered, ", "))
 	}
 	return res.Values, nil
+}
+
+// applyAccessoryURLs fills declared connection URLs that can be derived from
+// typed accessories, so a Postgres accessory does not also require the user
+// to type DATABASE_URL by hand.
+func (a *App) applyAccessoryURLs(res *secrets.Resolution) {
+	if a.cfg == nil || res == nil {
+		return
+	}
+	for name, value := range config.SynthesizeAccessoryURLs(a.cfg, res.Values) {
+		res.Values[name] = value
+		res.Sources[name] = secrets.SourceDerived
+		res.Missing = removeString(res.Missing, name)
+	}
+}
+
+func removeString(list []string, want string) []string {
+	out := list[:0]
+	for _, s := range list {
+		if s != want {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// openConfigFile finds buidl.yaml and opens it as a comment-preserving document.
+// Used by commands that write the file rather than resolve an environment.
+func (a *App) openConfigFile() (*config.File, error) {
+	path, err := config.ResolvePath(config.LoadOptions{Path: a.opts.configPath})
+	if err != nil {
+		return nil, err
+	}
+	f, err := config.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	a.path = path
+	a.root = filepath.Dir(path)
+	return f, nil
+}
+
+// validateEditedConfig loads every declared environment so a write cannot
+// leave a file the rest of the tool cannot parse.
+func (a *App) validateEditedConfig(f *config.File, extra string) error {
+	names := f.EnvironmentNames()
+	if extra != "" {
+		found := false
+		for _, n := range names {
+			if n == extra {
+				found = true
+				break
+			}
+		}
+		if !found {
+			names = append(names, extra)
+		}
+	}
+	if len(names) == 0 {
+		_, err := config.Load(config.LoadOptions{Path: f.Path, Strict: true, Vars: map[string]string{"BUIDL_SLUG": "example"}})
+		return err
+	}
+	for _, name := range names {
+		if _, err := config.Load(config.LoadOptions{
+			Path:        f.Path,
+			Environment: name,
+			Strict:      true,
+			Vars:        map[string]string{"BUIDL_SLUG": "example"},
+		}); err != nil {
+			return fmt.Errorf("the edited config did not validate for environment %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // hookRunner builds the lifecycle hook runner for the loaded config.

@@ -125,10 +125,7 @@ func applyDefaults(c *Config) {
 
 	// --- accessories ---
 	for name, acc := range c.Accessories {
-		if acc.MountPath == "" && acc.Storage != "" {
-			acc.MountPath = defaultMountPath(acc.Image)
-		}
-		c.Accessories[name] = acc
+		c.Accessories[name] = applyAccessoryDefaults(c.App, name, acc)
 	}
 }
 
