@@ -11,6 +11,8 @@ do about them.
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-08-14
+
 ### Changed
 
 - The happy path is `buidl init` then `buidl deploy`. Staging is implied when
@@ -129,7 +131,8 @@ First tagged release.
   control plane at a time. It does **not** cordon and drain first, so pods are
   restarted rather than gracefully evicted.
 
-[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/danecwalker/buidl/releases/tag/v0.1.5
 [0.1.4]: https://github.com/danecwalker/buidl/releases/tag/v0.1.4
 [0.1.3]: https://github.com/danecwalker/buidl/releases/tag/v0.1.3
 [0.1.2]: https://github.com/danecwalker/buidl/releases/tag/v0.1.2
