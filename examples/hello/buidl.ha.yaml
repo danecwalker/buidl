@@ -30,8 +30,6 @@ deploy:
   port: 8080
   replicas: 2
 
-  healthcheck:
-    path: /up
 
   resources:
     requests: {cpu: 25m, memory: 32Mi}

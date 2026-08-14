@@ -73,10 +73,10 @@ func TestGithubWorkflowIsValidYAML(t *testing.T) {
 // template would otherwise hide.
 func TestRenderedConfigIsValid(t *testing.T) {
 	detections := []project.Detection{
-		{Kind: project.KindGo, Stack: project.KindGo, Name: "payments", Port: 8080, HealthPath: "/up"},
-		{Kind: project.KindNode, Stack: project.KindNode, Name: "web", Port: 3000, HealthPath: "/up", Framework: "next"},
+		{Kind: project.KindGo, Stack: project.KindGo, Name: "payments", Port: 8080},
+		{Kind: project.KindNode, Stack: project.KindNode, Name: "web", Port: 3000, Framework: "next"},
 		{Kind: project.KindRuby, Stack: project.KindRuby, Name: "monolith", Port: 3000, HealthPath: "/up", Framework: "rails"},
-		{Kind: project.KindStatic, Stack: project.KindStatic, Name: "marketing", Port: 80, HealthPath: "/"},
+		{Kind: project.KindStatic, Stack: project.KindStatic, Name: "marketing", Port: 80},
 	}
 
 	for _, det := range detections {
@@ -103,8 +103,26 @@ func TestRenderedConfigIsValid(t *testing.T) {
 				if cfg.Deploy.Port != det.Port {
 					t.Errorf("Port = %d, want %d", cfg.Deploy.Port, det.Port)
 				}
-				if cfg.Deploy.Healthcheck.Path != det.HealthPath {
-					t.Errorf("healthcheck path = %q, want %q", cfg.Deploy.Healthcheck.Path, det.HealthPath)
+				if det.HealthPath != "" {
+					if cfg.Deploy.Healthcheck.Path != det.HealthPath {
+						t.Errorf("healthcheck path = %q, want %q", cfg.Deploy.Healthcheck.Path, det.HealthPath)
+					}
+					if cfg.Deploy.Healthcheck.Readiness != det.HealthPath {
+						t.Errorf("readiness = %q, want the explicit path %q", cfg.Deploy.Healthcheck.Readiness, det.HealthPath)
+					}
+				} else {
+					if cfg.Deploy.Healthcheck.Path != "" {
+						t.Errorf("healthcheck path = %q, want empty so z-pages apply", cfg.Deploy.Healthcheck.Path)
+					}
+					if cfg.Deploy.Healthcheck.Readiness != config.DefaultReadinessPath {
+						t.Errorf("readiness = %q, want %s", cfg.Deploy.Healthcheck.Readiness, config.DefaultReadinessPath)
+					}
+					if cfg.Deploy.Healthcheck.Liveness != config.DefaultLivenessPath {
+						t.Errorf("liveness = %q, want %s", cfg.Deploy.Healthcheck.Liveness, config.DefaultLivenessPath)
+					}
+					if cfg.Deploy.Healthcheck.Startup != config.DefaultStartupPath {
+						t.Errorf("startup = %q, want %s", cfg.Deploy.Healthcheck.Startup, config.DefaultStartupPath)
+					}
 				}
 				if env == "preview" {
 					if cfg.Deploy.Autoscale != nil {
@@ -147,7 +165,7 @@ func TestRenderedConfigIsValid(t *testing.T) {
 func TestRenderedConfigImpliesStaging(t *testing.T) {
 	rendered := renderConfig(project.Detection{
 		Kind: project.KindGo, Stack: project.KindGo,
-		Name: "web", Port: 8080, HealthPath: "/up",
+		Name: "web", Port: 8080,
 	}, "ghcr.io/acme/web")
 
 	if !strings.Contains(rendered, "defaultEnvironment: staging") {
@@ -267,7 +285,7 @@ func TestInitWithoutRegistryProducesAValidConfig(t *testing.T) {
 
 	rendered := renderConfig(project.Detection{
 		Kind: project.KindGo, Stack: project.KindGo,
-		Name: "hello", Port: 8080, HealthPath: "/up",
+		Name: "hello", Port: 8080,
 	}, image)
 
 	// Exactly what init does after writing the file.

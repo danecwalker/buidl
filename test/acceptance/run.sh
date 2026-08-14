@@ -168,7 +168,7 @@ case_serving() {
 
   local body code
   body="$(curl -fsS --max-time 10 localhost:18080/ 2>&1)"
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 localhost:18080/up)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 localhost:18080/readyz)"
 
   kill $pf 2>/dev/null || true
   wait $pf 2>/dev/null || true

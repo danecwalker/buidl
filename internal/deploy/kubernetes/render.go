@@ -357,8 +357,6 @@ func (t *Target) container(cfg *config.Config, rel release.Release) (*corev1.Con
 		return nil, fmt.Errorf("deploy.resources: %w", err)
 	}
 
-	probe := t.probe(cfg)
-
 	c := &corev1.Container{
 		Name: cfg.App,
 		// Always the digest reference: a restarted pod pulls identical bytes.
@@ -372,13 +370,12 @@ func (t *Target) container(cfg *config.Config, rel release.Release) (*corev1.Con
 		}},
 		Env:       env,
 		Resources: res,
-		// Readiness gates traffic; liveness restarts a wedged process. Using the
-		// same check for both is correct for most web apps.
-		ReadinessProbe: probe,
-		LivenessProbe:  livenessFrom(probe),
-		// A startup probe lets a slow-booting app take its time without forcing
-		// a long liveness period that would delay detection of a real hang.
-		StartupProbe: startupFrom(probe, cfg),
+		// Three probes, three jobs. Kubernetes will not run liveness or
+		// readiness until startup succeeds. Readiness gates traffic and the
+		// rollout. Liveness restarts a wedged process and must stay cheap.
+		ReadinessProbe: t.probe(cfg, cfg.Deploy.Healthcheck.Readiness),
+		LivenessProbe:  livenessFrom(t.probe(cfg, cfg.Deploy.Healthcheck.Liveness)),
+		StartupProbe:   startupFrom(t.probe(cfg, cfg.Deploy.Healthcheck.Startup), cfg),
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptr(false),
 			ReadOnlyRootFilesystem:   ptr(false),
@@ -462,8 +459,9 @@ func (t *Target) envVars(cfg *config.Config, rel release.Release) ([]corev1.EnvV
 	return out, nil
 }
 
-// probe builds the readiness probe from the healthcheck config.
-func (t *Target) probe(cfg *config.Config) *corev1.Probe {
+// probe builds one probe from the healthcheck config. path is the HTTP
+// endpoint for this probe; exec healthchecks ignore it.
+func (t *Target) probe(cfg *config.Config, path string) *corev1.Probe {
 	hc := cfg.Deploy.Healthcheck
 
 	p := &corev1.Probe{
@@ -480,11 +478,21 @@ func (t *Target) probe(cfg *config.Config) *corev1.Probe {
 	}
 
 	p.HTTPGet = &corev1.HTTPGetAction{
-		Path:   hc.Path,
-		Port:   intstr.FromInt32(hc.Port),
+		Path:   path,
+		Port:   probePort(cfg),
 		Scheme: corev1.URISchemeHTTP,
 	}
 	return p
+}
+
+// probePort prefers the container's named "http" port so a port change does
+// not leave probes pointed at a stale number. A healthcheck.port that differs
+// from deploy.port is an explicit override and stays numeric.
+func probePort(cfg *config.Config) intstr.IntOrString {
+	if cfg.Deploy.Healthcheck.Port != 0 && cfg.Deploy.Healthcheck.Port != cfg.Deploy.Port {
+		return intstr.FromInt32(cfg.Deploy.Healthcheck.Port)
+	}
+	return intstr.FromString("http")
 }
 
 // livenessFrom derives a liveness probe from readiness.
@@ -515,6 +523,12 @@ func startupFrom(readiness *corev1.Probe, cfg *config.Config) *corev1.Probe {
 	s := readiness.DeepCopy()
 	s.PeriodSeconds = 2
 	s.InitialDelaySeconds = 0
+	// A timeout longer than the period overlaps probes. Startup checks
+	// must stay cheap; the failure budget covers a slow boot, not a
+	// hung request.
+	if s.TimeoutSeconds > s.PeriodSeconds {
+		s.TimeoutSeconds = s.PeriodSeconds
+	}
 	// Allow up to the deploy timeout for the process to come up at all.
 	budget := cfg.Deploy.DeployTimeout.Or(defaultDeploy).Seconds()
 	s.FailureThreshold = int32(budget / 2)

@@ -119,11 +119,20 @@ func Validate(c *Config) error {
 
 	// --- healthcheck ---
 	hc := c.Deploy.Healthcheck
-	if hc.Path != "" && len(hc.Command) > 0 {
-		add("set either `deploy.healthcheck.path` or `deploy.healthcheck.command`, not both")
+	if len(hc.Command) > 0 && (hc.Path != "" || hc.Readiness != "" || hc.Liveness != "" || hc.Startup != "") {
+		add("set either HTTP probe paths or `deploy.healthcheck.command`, not both")
 	}
-	if hc.Path != "" && !strings.HasPrefix(hc.Path, "/") {
-		add("`deploy.healthcheck.path` must start with / (got %q)", hc.Path)
+	for _, p := range []struct {
+		name, val string
+	}{
+		{"path", hc.Path},
+		{"readiness", hc.Readiness},
+		{"liveness", hc.Liveness},
+		{"startup", hc.Startup},
+	} {
+		if p.val != "" && !strings.HasPrefix(p.val, "/") {
+			add("`deploy.healthcheck.%s` must start with / (got %q)", p.name, p.val)
+		}
 	}
 	if hc.Port < 1 || hc.Port > 65535 {
 		add("`deploy.healthcheck.port` must be between 1 and 65535 (got %d)", hc.Port)

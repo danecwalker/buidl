@@ -480,7 +480,73 @@ func accessoryContainer(cfg *config.Config, name string, acc config.Accessory) (
 		}}
 	}
 
+	applyAccessoryProbes(c, acc)
 	return c, nil
+}
+
+// applyAccessoryProbes adds startup, readiness, and liveness checks for
+// typed (or well-known) accessories. Postgres takes time to accept
+// connections on first boot; a startup probe covers that without making
+// liveness so slow it misses a real hang.
+func applyAccessoryProbes(c *corev1.Container, acc config.Accessory) {
+	cmd := accessoryProbeCommand(acc)
+	if len(cmd) == 0 {
+		return
+	}
+	base := &corev1.Probe{
+		ProbeHandler:     corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: cmd}},
+		TimeoutSeconds:   3,
+		SuccessThreshold: 1,
+	}
+	ready := base.DeepCopy()
+	ready.PeriodSeconds = 5
+	ready.FailureThreshold = 3
+	live := base.DeepCopy()
+	live.PeriodSeconds = 20
+	live.FailureThreshold = 6
+	start := base.DeepCopy()
+	start.PeriodSeconds = 2
+	start.TimeoutSeconds = 2
+	start.FailureThreshold = 30
+	c.ReadinessProbe = ready
+	c.LivenessProbe = live
+	c.StartupProbe = start
+}
+
+func accessoryProbeCommand(acc config.Accessory) []string {
+	switch accessoryKind(acc) {
+	case "postgres":
+		user := "postgres"
+		if acc.Env.Clear != nil && acc.Env.Clear["POSTGRES_USER"] != "" {
+			user = acc.Env.Clear["POSTGRES_USER"]
+		}
+		return []string{"pg_isready", "-U", user}
+	case "redis":
+		return []string{"redis-cli", "ping"}
+	default:
+		return nil
+	}
+}
+
+func accessoryKind(acc config.Accessory) string {
+	if kind := config.NormalizeAccessoryType(acc.Type); kind != "" {
+		return kind
+	}
+	name := acc.Image
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	if i := strings.IndexAny(name, ":@"); i >= 0 {
+		name = name[:i]
+	}
+	switch name {
+	case "postgres", "postgresql":
+		return "postgres"
+	case "redis", "valkey":
+		return "redis"
+	default:
+		return ""
+	}
 }
 
 // accessoryEnv renders env.clear.

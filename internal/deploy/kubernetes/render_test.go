@@ -497,7 +497,120 @@ func TestProbeDerivation(t *testing.T) {
 	if c.ReadinessProbe == nil || c.LivenessProbe == nil || c.StartupProbe == nil {
 		t.Fatal("expected readiness, liveness and startup probes")
 	}
+	if c.ReadinessProbe.HTTPGet == nil || c.ReadinessProbe.HTTPGet.Path != "/readyz" {
+		t.Errorf("readiness path = %v, want /readyz", c.ReadinessProbe.HTTPGet)
+	}
+	if c.LivenessProbe.HTTPGet == nil || c.LivenessProbe.HTTPGet.Path != "/livez" {
+		t.Errorf("liveness path = %v, want /livez", c.LivenessProbe.HTTPGet)
+	}
+	if c.StartupProbe.HTTPGet == nil || c.StartupProbe.HTTPGet.Path != "/startupz" {
+		t.Errorf("startup path = %v, want /startupz", c.StartupProbe.HTTPGet)
+	}
+	if c.ReadinessProbe.HTTPGet.Port.String() != "http" {
+		t.Errorf("probe port = %q, want named port http", c.ReadinessProbe.HTTPGet.Port.String())
+	}
 	// Liveness must be more forgiving than readiness: it kills the container.
+	if c.LivenessProbe.FailureThreshold <= c.ReadinessProbe.FailureThreshold {
+		t.Errorf("liveness threshold (%d) should exceed readiness (%d)",
+			c.LivenessProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold)
+	}
+	if c.StartupProbe.PeriodSeconds >= c.ReadinessProbe.PeriodSeconds {
+		t.Error("startup probe should poll more frequently than readiness")
+	}
+	if c.StartupProbe.TimeoutSeconds > c.StartupProbe.PeriodSeconds {
+		t.Errorf("startup timeout (%d) must not exceed period (%d)",
+			c.StartupProbe.TimeoutSeconds, c.StartupProbe.PeriodSeconds)
+	}
+}
+
+func TestSingleHealthPathAppliesToAllProbes(t *testing.T) {
+	target, req := testRequest(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  kubernetes: {namespace: acme}
+  healthcheck:
+    path: /up
+`)
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	c := findObject(objs, "Deployment").Object.(*appsv1.Deployment).Spec.Template.Spec.Containers[0]
+	for _, p := range []*corev1.Probe{c.ReadinessProbe, c.LivenessProbe, c.StartupProbe} {
+		if p == nil || p.HTTPGet == nil || p.HTTPGet.Path != "/up" {
+			t.Fatalf("expected all probes to use /up, got %#v", p)
+		}
+	}
+}
+
+func TestProbePathOverrides(t *testing.T) {
+	target, req := testRequest(t, renderBase+`
+  healthcheck:
+    readiness: /ready
+    liveness: /live
+    startup: /start
+`)
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	c := findObject(objs, "Deployment").Object.(*appsv1.Deployment).Spec.Template.Spec.Containers[0]
+	if c.ReadinessProbe.HTTPGet.Path != "/ready" {
+		t.Errorf("readiness = %q", c.ReadinessProbe.HTTPGet.Path)
+	}
+	if c.LivenessProbe.HTTPGet.Path != "/live" {
+		t.Errorf("liveness = %q", c.LivenessProbe.HTTPGet.Path)
+	}
+	if c.StartupProbe.HTTPGet.Path != "/start" {
+		t.Errorf("startup = %q", c.StartupProbe.HTTPGet.Path)
+	}
+}
+
+func TestHealthcheckPortOverrideIsNumeric(t *testing.T) {
+	target, req := testRequest(t, renderBase+`
+  healthcheck:
+    port: 9090
+`)
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	c := findObject(objs, "Deployment").Object.(*appsv1.Deployment).Spec.Template.Spec.Containers[0]
+	if c.ReadinessProbe.HTTPGet.Port.String() != "9090" {
+		t.Errorf("probe port = %q, want 9090 when healthcheck.port differs from deploy.port",
+			c.ReadinessProbe.HTTPGet.Port.String())
+	}
+	if c.Ports[0].Name != "http" || c.Ports[0].ContainerPort != 3000 {
+		t.Errorf("container port = %+v, want named http on deploy.port", c.Ports[0])
+	}
+}
+
+func TestExecProbesShareCommandWithSplitTimings(t *testing.T) {
+	target, req := testRequest(t, `
+app: worker
+image: ghcr.io/acme/worker
+deploy:
+  kubernetes: {namespace: acme}
+  healthcheck:
+    command: [pgrep, sidekiq]
+`)
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	c := findObject(objs, "Deployment").Object.(*appsv1.Deployment).Spec.Template.Spec.Containers[0]
+	for _, p := range []*corev1.Probe{c.ReadinessProbe, c.LivenessProbe, c.StartupProbe} {
+		if p == nil || p.Exec == nil {
+			t.Fatal("expected exec probes for a worker")
+		}
+		if strings.Join(p.Exec.Command, " ") != "pgrep sidekiq" {
+			t.Errorf("exec command = %v", p.Exec.Command)
+		}
+		if p.HTTPGet != nil {
+			t.Error("did not expect an HTTP probe alongside a command probe")
+		}
+	}
 	if c.LivenessProbe.FailureThreshold <= c.ReadinessProbe.FailureThreshold {
 		t.Errorf("liveness threshold (%d) should exceed readiness (%d)",
 			c.LivenessProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold)

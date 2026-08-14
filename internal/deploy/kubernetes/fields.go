@@ -99,7 +99,12 @@ func deploymentFieldChanges(live, desired *unstructured.Unstructured) []deploy.F
 			{"memory request", []string{"resources", "requests", "memory"}},
 			{"cpu limit", []string{"resources", "limits", "cpu"}},
 			{"memory limit", []string{"resources", "limits", "memory"}},
-			{"health path", []string{"readinessProbe", "httpGet", "path"}},
+			{"readiness path", []string{"readinessProbe", "httpGet", "path"}},
+			{"liveness path", []string{"livenessProbe", "httpGet", "path"}},
+			{"startup path", []string{"startupProbe", "httpGet", "path"}},
+			{"readiness exec", []string{"readinessProbe", "exec", "command"}},
+			{"liveness exec", []string{"livenessProbe", "exec", "command"}},
+			{"startup exec", []string{"startupProbe", "exec", "command"}},
 			{"command", []string{"command"}},
 		})...)
 
@@ -341,7 +346,9 @@ func podTemplateField(name string) bool {
 	case "image", "port", "command", "secret values",
 		"env added", "env removed", "env changed",
 		"cpu request", "memory request", "cpu limit", "memory limit",
-		"health path", "serviceAccount", "gracePeriod":
+		"readiness path", "liveness path", "startup path",
+		"readiness exec", "liveness exec", "startup exec",
+		"serviceAccount", "gracePeriod":
 		return true
 	}
 	return false

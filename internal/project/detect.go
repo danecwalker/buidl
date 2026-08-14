@@ -121,14 +121,11 @@ func Detect(dir string) (Detection, error) {
 	case exists(filepath.Join(abs, "index.html")):
 		d.setKind(KindStatic)
 		d.Port = 80
-		d.HealthPath = "/"
-		d.Notes = append(d.Notes, "static site; will be served by nginx")
+		d.Notes = append(d.Notes, "static site; nginx will serve /livez, /readyz, and /startupz")
 	}
 
 	if d.HealthPath == "" {
-		// Kamal's convention, and a good default to standardize on.
-		d.HealthPath = "/up"
-		d.Notes = append(d.Notes, "no known health endpoint; assuming /up — add one or change deploy.healthcheck.path")
+		d.Notes = append(d.Notes, "serve /livez, /readyz, and /startupz — or set deploy.healthcheck.path")
 	}
 
 	return d, nil

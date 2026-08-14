@@ -38,8 +38,17 @@ func TestLoadMinimalAppliesDefaults(t *testing.T) {
 	if cfg.Deploy.Port != DefaultPort {
 		t.Errorf("Port = %d, want %d", cfg.Deploy.Port, DefaultPort)
 	}
-	if got := cfg.Deploy.Healthcheck.Path; got != DefaultHealthcheckPath {
-		t.Errorf("Healthcheck.Path = %q, want %q", got, DefaultHealthcheckPath)
+	if cfg.Deploy.Healthcheck.Path != "" {
+		t.Errorf("Healthcheck.Path = %q, want empty so each probe uses its z-page", cfg.Deploy.Healthcheck.Path)
+	}
+	if got := cfg.Deploy.Healthcheck.Readiness; got != DefaultReadinessPath {
+		t.Errorf("Healthcheck.Readiness = %q, want %q", got, DefaultReadinessPath)
+	}
+	if got := cfg.Deploy.Healthcheck.Liveness; got != DefaultLivenessPath {
+		t.Errorf("Healthcheck.Liveness = %q, want %q", got, DefaultLivenessPath)
+	}
+	if got := cfg.Deploy.Healthcheck.Startup; got != DefaultStartupPath {
+		t.Errorf("Healthcheck.Startup = %q, want %q", got, DefaultStartupPath)
 	}
 	// The healthcheck must default to the app's port, not a fixed one.
 	if cfg.Deploy.Healthcheck.Port != DefaultPort {
@@ -492,6 +501,21 @@ func TestValidation(t *testing.T) {
 			wantErr: "not both",
 		},
 		{
+			name:    "healthcheck readiness and command",
+			yaml:    "app: web\nimage: ghcr.io/acme/web\ndeploy: {healthcheck: {readiness: /readyz, command: [true]}}\n",
+			wantErr: "not both",
+		},
+		{
+			name:    "healthcheck path missing slash",
+			yaml:    "app: web\nimage: ghcr.io/acme/web\ndeploy: {healthcheck: {path: up}}\n",
+			wantErr: "must start with /",
+		},
+		{
+			name:    "healthcheck readiness missing slash",
+			yaml:    "app: web\nimage: ghcr.io/acme/web\ndeploy: {healthcheck: {readiness: readyz}}\n",
+			wantErr: "must start with /",
+		},
+		{
 			name:    "host with scheme",
 			yaml:    "app: web\nimage: ghcr.io/acme/web\nproxy: {host: \"https://acme.com\"}\n",
 			wantErr: "bare hostname",
@@ -684,6 +708,56 @@ environments:
 	}
 	if res.Config.Deploy.Replicas == nil || *res.Config.Deploy.Replicas != 1 {
 		t.Errorf("preview replicas = %v, want 1", res.Config.Deploy.Replicas)
+	}
+}
+
+func TestHealthcheckPathAppliesToAllProbes(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  healthcheck:
+    path: /up
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	hc := res.Config.Deploy.Healthcheck
+	if hc.Path != "/up" {
+		t.Errorf("Path = %q, want /up", hc.Path)
+	}
+	for _, got := range []struct{ name, val string }{
+		{"readiness", hc.Readiness},
+		{"liveness", hc.Liveness},
+		{"startup", hc.Startup},
+	} {
+		if got.val != "/up" {
+			t.Errorf("%s = %q, want /up", got.name, got.val)
+		}
+	}
+}
+
+func TestHealthcheckPerProbeOverride(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  healthcheck:
+    path: /up
+    readiness: /readyz
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	hc := res.Config.Deploy.Healthcheck
+	if hc.Readiness != "/readyz" {
+		t.Errorf("Readiness = %q, want /readyz (explicit override)", hc.Readiness)
+	}
+	if hc.Liveness != "/up" {
+		t.Errorf("Liveness = %q, want /up from path", hc.Liveness)
+	}
+	if hc.Startup != "/up" {
+		t.Errorf("Startup = %q, want /up from path", hc.Startup)
 	}
 }
 

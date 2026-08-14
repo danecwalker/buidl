@@ -11,6 +11,24 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** HTTP apps default to Kubernetes z-pages instead of `/up`.
+  Readiness probes `GET /readyz`, liveness `GET /livez`, startup `GET /startupz`.
+  Existing apps that only implement `/up` should add the three endpoints, or
+  set `deploy.healthcheck.path: /up` to keep one path for all three probes
+  (Rails/Kamal). Set `healthcheck.readiness` / `liveness` / `startup` to
+  override a single probe. A timed-out deploy names those paths; buidl does
+  not fall back to another endpoint.
+
+### Added
+
+- HTTP probes use the container's named `http` port, so a port change cannot
+  leave probes pointed at a stale number.
+- Postgres and Redis accessories get `pg_isready` / `redis-cli ping` startup,
+  readiness, and liveness probes. `accessory plan` reports an exec-probe
+  change as a restart.
+
 ## [0.1.8] — 2026-08-14
 
 ### Changed

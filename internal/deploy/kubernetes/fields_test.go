@@ -27,7 +27,7 @@ func deployment(image string, replicas int64, env map[string]string, mutate ...f
 			"requests": map[string]any{"cpu": "100m", "memory": "128Mi"},
 		},
 		"readinessProbe": map[string]any{
-			"httpGet": map[string]any{"path": "/up"},
+			"httpGet": map[string]any{"path": "/readyz"},
 		},
 	}
 
@@ -270,6 +270,32 @@ func TestIngressChangesReported(t *testing.T) {
 	tls := findField(changes, "tls")
 	if tls == nil || tls.From != "disabled" || tls.To != "enabled" {
 		t.Errorf("tls change = %v", tls)
+	}
+}
+
+func TestExecProbeChangeIsReported(t *testing.T) {
+	withExec := func(cmd string) func(map[string]any) {
+		return func(obj map[string]any) {
+			c := obj["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+			c["readinessProbe"] = map[string]any{
+				"exec": map[string]any{"command": []any{"pg_isready", "-U", cmd}},
+			}
+		}
+	}
+
+	live := deployment("img", 1, nil, withExec("postgres"))
+	desired := deployment("img", 1, nil, withExec("appuser"))
+	changes := fieldChanges("StatefulSet", live, desired)
+
+	exec := findField(changes, "readiness exec")
+	if exec == nil {
+		t.Fatalf("expected a readiness exec change, got %v", changes)
+	}
+	if !strings.Contains(exec.From, "postgres") || !strings.Contains(exec.To, "appuser") {
+		t.Errorf("readiness exec = %s", exec)
+	}
+	if got := impactOf("StatefulSet", deploy.ActionUpdate, changes, 1); got != "restarts the accessory" {
+		t.Errorf("impact = %q, want restarts the accessory", got)
 	}
 }
 

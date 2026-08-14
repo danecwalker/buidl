@@ -108,8 +108,9 @@ state first. A fresh set of servers gets Kubernetes installed and joined; an
 existing cluster is left alone. There is no separate bootstrap command — the plan
 knows the difference, so the same command works either way.
 
-The rollout is gated on health checks: deploy only succeeds once the new release
-is actually serving. That makes it safe to use as a CI gate.
+The rollout is gated on readiness (` + "`GET /readyz`" + ` by default): deploy only
+succeeds once the new release is actually serving. That makes it safe to use
+as a CI gate.
 
 Examples:
   buidl deploy
