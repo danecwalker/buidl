@@ -356,13 +356,9 @@ func (a *App) target() (deploy.Target, error) {
 // production" during an incident, which is the most alarming possible wrong
 // answer.
 //
-// Fetching the credentials automatically was the alternative. It is what deploy
-// and promote do (see ensureClusterCredentials), because they are already
-// changing the cluster and hold the cobra command needed to run it. A read
-// command is different: SSHing into the fleet and rewriting ~/.kube/config as a
-// side effect of `status` is a surprise, it needs SSH access the reader may not
-// have, and it can block on a host-key prompt at the worst moment. Saying which
-// command to run is faster and never wrong.
+// Fetching the credentials automatically is what plan, deploy, and promote
+// do (see adoptManagedContext / ensureClusterCredentials). A command that
+// did not take that path still fails here rather than falling through.
 func (a *App) managedContext() (string, error) {
 	if a.cfg.Infra == nil || a.cfg.Deploy.Kubernetes.Context != "" {
 		return "", nil
@@ -373,8 +369,8 @@ func (a *App) managedContext() (string, error) {
 		return name, nil
 	}
 	return "", fmt.Errorf("no local credentials for the %s cluster (kubeconfig context %q not found)\n\n"+
-		"hint: fetch them with `buidl cluster kubeconfig%s`, or run `buidl deploy%s`, which fetches them while converging the cluster",
-		a.cfg.Environment, name, a.environmentFlag(), a.environmentFlag())
+		"hint: fetch them with `buidl cluster kubeconfig%s`, or run `buidl plan%s` / `buidl deploy%s`, which fetch them automatically",
+		a.cfg.Environment, name, a.environmentFlag(), a.environmentFlag(), a.environmentFlag())
 }
 
 // environmentFlag renders the -e flag for a hint, or nothing when the config has

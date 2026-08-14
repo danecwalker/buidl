@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/danecwalker/buidl/internal/cluster"
 	"github.com/danecwalker/buidl/internal/config"
 	"github.com/danecwalker/buidl/internal/inventory"
@@ -111,5 +113,46 @@ func TestAddonPlanSummary(t *testing.T) {
 				t.Errorf("addonPlanSummary = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAdoptManagedContextPinsExisting(t *testing.T) {
+	writeKubeconfig(t, "docker-desktop", "docker-desktop", "web-staging")
+
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.cfg = &config.Config{App: "web", Environment: "staging", Infra: &config.Infra{}}
+
+	if err := app.adoptManagedContext(&cobra.Command{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.cfg.Deploy.Kubernetes.Context; got != "web-staging" {
+		t.Errorf("context = %q, want web-staging", got)
+	}
+}
+
+func TestAdoptManagedContextMissingWithoutManager(t *testing.T) {
+	writeKubeconfig(t, "docker-desktop", "docker-desktop")
+
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.cfg = &config.Config{App: "web", Environment: "staging", Infra: &config.Infra{}}
+
+	err := app.adoptManagedContext(&cobra.Command{}, nil)
+	if err == nil {
+		t.Fatal("expected a missing-credentials error")
+	}
+	if !strings.Contains(err.Error(), "web-staging") {
+		t.Errorf("error should name the missing context, got: %v", err)
+	}
+}
+
+func TestEnsureClusterCredentialsNoInfra(t *testing.T) {
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.cfg = &config.Config{App: "web", Environment: "staging"}
+
+	if err := app.ensureClusterCredentials(&cobra.Command{}); err != nil {
+		t.Fatalf("no infra should be a no-op: %v", err)
+	}
+	if app.cfg.Deploy.Kubernetes.Context != "" {
+		t.Errorf("context = %q, want empty when buidl does not manage the cluster", app.cfg.Deploy.Kubernetes.Context)
 	}
 }

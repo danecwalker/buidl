@@ -137,6 +137,62 @@ func TestSynthesizeAccessoryURLs(t *testing.T) {
 	}
 }
 
+func TestSecretNamesIncludesAccessorySecrets(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+env:
+  secret: [DATABASE_URL]
+accessories:
+  postgres:
+    type: postgres
+  redis:
+    type: redis
+`), Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.Config.SecretNames()
+	if !containsString(got, "DATABASE_URL") {
+		t.Errorf("SecretNames = %v, want DATABASE_URL", got)
+	}
+	if !containsString(got, "POSTGRES_PASSWORD") {
+		t.Errorf("SecretNames = %v, want the accessory password", got)
+	}
+	if got[0] != "DATABASE_URL" {
+		t.Errorf("app env.secret should come first, got %v", got)
+	}
+	// Redis has no required secret; do not invent one.
+	if containsString(got, "REDIS_URL") {
+		t.Errorf("undeclared REDIS_URL should not be required: %v", got)
+	}
+}
+
+func TestSecretNamesDedupesAppAndAccessory(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+env:
+  secret: [POSTGRES_PASSWORD, DATABASE_URL]
+accessories:
+  postgres:
+    type: postgres
+`), Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.Config.SecretNames()
+	n := 0
+	for _, name := range got {
+		if name == "POSTGRES_PASSWORD" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("POSTGRES_PASSWORD appeared %d times in %v", n, got)
+	}
+}
+
 func TestSynthesizeSkipsUndeclared(t *testing.T) {
 	cfg := &Config{
 		App: "web",

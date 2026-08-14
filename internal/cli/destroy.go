@@ -69,6 +69,10 @@ Examples:
 				return fmt.Errorf("%s", decision.Reason)
 			}
 
+			if err := a.ensureClusterCredentials(cmd); err != nil {
+				return err
+			}
+
 			target, err := a.target()
 			if err != nil {
 				return err

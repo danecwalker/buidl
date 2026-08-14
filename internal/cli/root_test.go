@@ -109,6 +109,9 @@ func TestManagedContext(t *testing.T) {
 				if !strings.Contains(err.Error(), "buidl cluster kubeconfig") {
 					t.Errorf("error = %q, want the command that fetches credentials", err)
 				}
+				if !strings.Contains(err.Error(), "buidl plan") {
+					t.Errorf("error = %q, want plan as the automatic fetch path", err)
+				}
 				// The current context must never be offered as a substitute.
 				if strings.Contains(err.Error(), "docker-desktop") {
 					t.Errorf("error = %q, must not suggest the current context", err)

@@ -179,22 +179,12 @@ Examples:
 							return err
 						}
 
-						// Point the deploy at the managed cluster — but only after
-						// confirming this machine actually has its credentials. The
-						// cluster being up to date says nothing about the local
-						// kubeconfig: a CI runner starts with none, and a previous run
-						// that failed after installing leaves the cluster healthy with
-						// nothing fetched. Assuming the context exists turns that into
-						// "context not found" against a perfectly good cluster.
-						if a.cfg.Deploy.Kubernetes.Context == "" {
-							contextName := a.defaultContextName()
-							if !cluster.ContextExists(contextName) {
-								a.log.Detail("no local credentials for %s; fetching", contextName)
-								if err := a.fetchKubeconfig(cmd, mgr, contextName, "", false); err != nil {
-									return fmt.Errorf("the cluster is up to date but its kubeconfig could not be fetched: %w", err)
-								}
-							}
-							a.cfg.Deploy.Kubernetes.Context = contextName
+						// The cluster being up to date says nothing about the
+						// local kubeconfig: a CI runner starts with none, and
+						// a previous run that failed after installing leaves
+						// the cluster healthy with nothing fetched.
+						if err := a.adoptManagedContext(cmd, mgr); err != nil {
+							return err
 						}
 					}
 				}
@@ -367,6 +357,10 @@ Kubernetes installation they need is part of the plan. That makes this the singl
 place to see everything a deploy would do — bringing up a fresh fleet, joining a
 new worker, upgrading a pinned version, and the application rollout itself.
 
+If the cluster already exists, plan fetches its kubeconfig into this machine
+the same way deploy does, so the application diff can be computed without a
+separate ` + "`buidl cluster kubeconfig`" + ` step.
+
 The application diff is computed by the Kubernetes API server, so it reflects the
 same defaulting and admission logic a real apply would go through. If the cluster
 does not exist yet there is nothing to diff against, and the plan reports the
@@ -402,13 +396,15 @@ cluster work alone.`,
 				// belongs in the exit code.
 				addonsPending = len(clusterPlan.PendingAddons()) > 0
 
-				// Only target the managed cluster once we know this machine holds
-				// its credentials. Writing the field unconditionally would pin a
-				// context that does not exist locally, hiding the missing-credentials
-				// error target() raises — the one that names the command to fix it.
-				if !clusterChangesPending && a.cfg.Deploy.Kubernetes.Context == "" {
-					if name := a.defaultContextName(); cluster.ContextExists(name) {
-						a.cfg.Deploy.Kubernetes.Context = name
+				// The cluster is already there: fetch credentials if this
+				// machine does not have them yet. Plan is otherwise a dead
+				// end — it just inspected the fleet over SSH, then failed
+				// because ~/.kube/config was empty. Do not fetch when the
+				// cluster still needs installing; there is no kubeconfig
+				// yet, and the app plan falls through below.
+				if !clusterChangesPending {
+					if err := a.adoptManagedContext(cmd, mgr); err != nil {
+						return err
 					}
 				}
 				a.log.Info("")
@@ -688,11 +684,15 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
+			cmd.SetContext(ctx)
 
 			if err := a.requireConfig(ctx); err != nil {
 				return err
 			}
 			if err := a.confirmProduction(cmd, yes); err != nil {
+				return err
+			}
+			if err := a.ensureClusterCredentials(cmd); err != nil {
 				return err
 			}
 

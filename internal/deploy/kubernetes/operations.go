@@ -52,16 +52,18 @@ func (t *Target) Preflight(ctx context.Context, req deploy.Request) error {
 	}
 
 	// 4. Are all declared secrets actually present? A missing secret otherwise
-	//    manifests as CreateContainerConfigError minutes later.
+	//    manifests as CreateContainerConfigError minutes later. Accessory
+	//    names (POSTGRES_PASSWORD) are required even when they are not on
+	//    the app's env.secret.
 	var missing []string
-	for _, name := range cfg.Env.Secret {
+	for _, name := range cfg.SecretNames() {
 		if _, ok := req.Secrets[name]; !ok {
 			missing = append(missing, name)
 		}
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return fmt.Errorf("required secret(s) not set in the environment: %s\n\nhint: export them, or remove them from env.secret in buidl.yaml", strings.Join(missing, ", "))
+		return fmt.Errorf("required secret(s) not set in the environment: %s\n\nhint: export them, or add them to .buidl/secrets", strings.Join(missing, ", "))
 	}
 
 	// 5. Does the image exist in the registry? The kubelet's failure mode for a

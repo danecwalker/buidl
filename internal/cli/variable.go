@@ -22,7 +22,8 @@ func newVariableCmd(a *App) *cobra.Command {
 
 Values are never printed. Secrets are reported by name, source and length only,
 because this output is the kind of thing that ends up pasted into a chat or a
-ticket.
+ticket. Accessory secrets such as POSTGRES_PASSWORD are listed even when they
+are not declared under the app's env.secret.
 
   buidl variable list
   buidl variable set DATABASE_URL=postgres://...
@@ -73,13 +74,18 @@ func newVariableListCmd(a *App) *cobra.Command {
 			}
 			sort.Strings(clearNames)
 
-			rows := make([][]string, 0, len(clearNames)+len(a.cfg.Env.Secret))
+			secretNames := a.cfg.SecretNames()
+			rows := make([][]string, 0, len(clearNames)+len(secretNames))
 			for _, name := range clearNames {
 				rows = append(rows, []string{name, "clear", "buidl.yaml", a.cfg.Env.Clear[name]})
 			}
 
-			declared := append([]string(nil), a.cfg.Env.Secret...)
+			declared := append([]string(nil), secretNames...)
 			sort.Strings(declared)
+			appSecrets := map[string]bool{}
+			for _, name := range a.cfg.Env.Secret {
+				appSecrets[name] = true
+			}
 			for _, name := range declared {
 				source := "MISSING"
 				shape := "-"
@@ -87,7 +93,11 @@ func newVariableListCmd(a *App) *cobra.Command {
 					source = string(res.Sources[name])
 					shape = fmt.Sprintf("set, %d chars", len(value))
 				}
-				rows = append(rows, []string{name, "secret", source, shape})
+				kind := "secret"
+				if !appSecrets[name] {
+					kind = "accessory"
+				}
+				rows = append(rows, []string{name, kind, source, shape})
 			}
 
 			a.log.Table([]string{"name", "kind", "source", "value"}, rows)

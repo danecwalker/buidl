@@ -11,6 +11,22 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- `buidl plan` fetches kubeconfig for a managed cluster that already exists,
+  the same way `deploy` does. A first plan no longer dies on a missing
+  local context after it has just inspected the fleet over SSH.
+  `status`, `logs`, `releases`, `rollback`, `destroy`, and `accessory`
+  do the same fetch when credentials are missing.
+
+### Fixed
+
+- Deploy and `variable list` resolve accessory secrets (such as
+  `POSTGRES_PASSWORD` on `type: postgres`) from `.buidl/secrets`. Previously
+  only names listed under the app's `env.secret` were loaded, so a typed
+  Postgres accessory failed preflight even when the password was on disk.
+  Accessory-only secrets are still not injected into the app.
+
 ## [0.2.0] — 2026-08-14
 
 ### Changed

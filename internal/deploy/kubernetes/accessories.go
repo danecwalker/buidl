@@ -278,12 +278,12 @@ func (t *Target) accessorySecret(cfg *config.Config, rel release.Release, name s
 		fmt.Fprintf(h, "%s=%s\n", key, v)
 	}
 
-	// Preflight only checks the app's declared secrets, so without this an
-	// accessory would be created with no POSTGRES_PASSWORD and fail to boot for
-	// reasons visible only in the container's logs.
+	// resolveSecrets and Preflight should have caught this already. Fail
+	// here too so a caller that built Request by hand cannot create a
+	// Postgres with no password and a failure only in container logs.
 	if len(missing) > 0 {
-		return nil, "", fmt.Errorf("accessory %q requires secret(s) not set in the environment: %s\n\nhint: export them, or remove them from accessories.%s.env.secret in buidl.yaml",
-			name, strings.Join(missing, ", "), name)
+		return nil, "", fmt.Errorf("accessory %q requires secret(s) not set in the environment: %s\n\nhint: export them, or add them to .buidl/secrets",
+			name, strings.Join(missing, ", "))
 	}
 
 	objectName := release.ObjectName(cfg.App, name, "env")

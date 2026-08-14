@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -52,7 +51,8 @@ an accessory no longer matches its configuration.`,
 			ctx, cancel := a.context()
 			defer cancel()
 
-			target, req, err := a.accessoryRequest(ctx)
+			cmd.SetContext(ctx)
+			target, req, err := a.accessoryRequest(cmd)
 			if err != nil {
 				return err
 			}
@@ -89,7 +89,8 @@ changes restart the accessory and which do not.`,
 			ctx, cancel := a.context()
 			defer cancel()
 
-			target, req, err := a.accessoryRequest(ctx)
+			cmd.SetContext(ctx)
+			target, req, err := a.accessoryRequest(cmd)
 			if err != nil {
 				return err
 			}
@@ -133,7 +134,8 @@ changes restart the accessory and which do not.`,
 }
 
 // accessoryRequest resolves everything the accessory commands share.
-func (a *App) accessoryRequest(ctx context.Context) (*kubernetes.Target, deploy.Request, error) {
+func (a *App) accessoryRequest(cmd *cobra.Command) (*kubernetes.Target, deploy.Request, error) {
+	ctx := cmd.Context()
 	if err := a.requireConfig(ctx); err != nil {
 		return nil, deploy.Request{}, err
 	}
@@ -145,6 +147,10 @@ func (a *App) accessoryRequest(ctx context.Context) (*kubernetes.Target, deploy.
 
 	if a.cfg.Deploy.Target != "kubernetes" {
 		return nil, deploy.Request{}, fmt.Errorf("accessories are only supported for the kubernetes target")
+	}
+
+	if err := a.ensureClusterCredentials(cmd); err != nil {
+		return nil, deploy.Request{}, err
 	}
 
 	secretValues, err := a.resolveSecrets()

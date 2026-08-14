@@ -24,8 +24,12 @@ which commit it came from, who deployed it, and which instances are unhealthy.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
+			cmd.SetContext(ctx)
 
 			if err := a.requireConfig(ctx); err != nil {
+				return err
+			}
+			if err := a.ensureClusterCredentials(cmd); err != nil {
 				return err
 			}
 
@@ -167,8 +171,12 @@ be passed to ` + "`buidl rollback --to`" + `.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
+			cmd.SetContext(ctx)
 
 			if err := a.requireConfig(ctx); err != nil {
+				return err
+			}
+			if err := a.ensureClusterCredentials(cmd); err != nil {
 				return err
 			}
 
@@ -234,8 +242,12 @@ came from.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
+			cmd.SetContext(ctx)
 
 			if err := a.requireConfig(ctx); err != nil {
+				return err
+			}
+			if err := a.ensureClusterCredentials(cmd); err != nil {
 				return err
 			}
 

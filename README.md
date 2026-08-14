@@ -210,7 +210,7 @@ The process environment outranks every file, so CI injection is never overridden
 
 Values go into a Kubernetes Secret, never into `buidl.yaml`. A checksum of the resolved secrets is annotated on the pod template, so changing a secret value rolls the pods.
 
-`buidl variable list` (or `var` / `vars`) prints each variable, its kind, and where it came from. Secrets show as `set, N chars`, never the value.
+`buidl variable list` (or `var` / `vars`) prints each variable, its kind, and where it came from. Secrets show as `set, N chars`, never the value. Accessory secrets such as `POSTGRES_PASSWORD` are resolved from the same files even when they are not listed under the app's `env.secret`; they are not injected into the app.
 
 For secrets already in the cluster (External Secrets, Vault), use `env.secretRefs`.
 
@@ -250,7 +250,7 @@ buidl add --database postgres
 buidl add --database redis
 ```
 
-That writes `type: postgres` (or `redis`) and generates `POSTGRES_PASSWORD` plus `DATABASE_URL` into `.buidl/secrets`. Image, port, volume and mount path are filled at load. A first `buidl deploy` creates any accessory that is not already in the cluster. Later deploys leave existing accessories alone — including ones that have drifted — so shipping a web change cannot restart a database.
+That writes `type: postgres` (or `redis`) and generates `POSTGRES_PASSWORD` plus `DATABASE_URL` into `.buidl/secrets`. Image, port, volume and mount path are filled at load. A password already in `.buidl/secrets` is enough — you do not have to list `POSTGRES_PASSWORD` under the app's `env.secret`. A first `buidl deploy` creates any accessory that is not already in the cluster. Later deploys leave existing accessories alone — including ones that have drifted — so shipping a web change cannot restart a database.
 
 ```yaml
 accessories:
@@ -314,7 +314,7 @@ infra:
     - {host: 203.0.113.11, role: worker, labels: {pool: gpu}, taints: ["gpu=true:NoSchedule"]}
 ```
 
-There is no separate "create the cluster" command. `buidl plan` inspects the servers and includes any Kubernetes install they need. `buidl deploy` converges the cluster, then ships the app.
+There is no separate "create the cluster" command. `buidl plan` inspects the servers and includes any Kubernetes install they need. If the cluster is already there, plan also fetches its kubeconfig so the application diff can run. `buidl deploy` converges the cluster, then ships the app.
 
 ```sh
 buidl plan    -e production

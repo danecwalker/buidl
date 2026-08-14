@@ -24,9 +24,10 @@ type Request struct {
 	Release release.Release
 	// Root is the directory containing buidl.yaml.
 	Root string
-	// Secrets holds resolved values for the names listed in config.Env.Secret.
-	// Populated at deploy time from the local environment or a secrets provider;
-	// never persisted by buidl.
+	// Secrets holds resolved values for SecretNames(): the app's env.secret
+	// and each accessory's env.secret. Populated at deploy time from the
+	// local environment or a secrets provider; never persisted by buidl.
+	// Accessory-only names stay off the app container.
 	Secrets map[string]string
 	// Wait blocks until the release is healthy. Almost always true: a deploy
 	// command that returns before the app is up is useless as a CI gate.

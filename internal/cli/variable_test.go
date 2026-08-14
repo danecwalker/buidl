@@ -68,6 +68,44 @@ env:
 	}
 }
 
+func TestVariableListShowsAccessorySecret(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+env:
+  secret: [DATABASE_URL]
+accessories:
+  postgres:
+    type: postgres
+`)
+	const password = "accessory-password-do-not-print"
+	if _, err := secrets.Set(filepath.Dir(path), "", "POSTGRES_PASSWORD", password); err != nil {
+		t.Fatal(err)
+	}
+
+	app, out := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newVariableCmd(app)
+	cmd.SetArgs([]string{"list"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	listed := out.String()
+	if !strings.Contains(listed, "POSTGRES_PASSWORD") {
+		t.Errorf("list missing accessory secret:\n%s", listed)
+	}
+	if !strings.Contains(listed, "accessory") {
+		t.Errorf("list should mark accessory-only secrets:\n%s", listed)
+	}
+	if strings.Contains(listed, password) {
+		t.Errorf("variable list printed the accessory password:\n%s", listed)
+	}
+	if !strings.Contains(listed, "set,") {
+		t.Errorf("list should report the accessory secret as set:\n%s", listed)
+	}
+}
+
 func TestVariableSetClearWritesYAML(t *testing.T) {
 	path := writeTempConfig(t, `
 app: web
