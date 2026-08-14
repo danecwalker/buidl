@@ -33,8 +33,9 @@ func newInitCmd(a *App) *cobra.Command {
 		Long: `Inspect the current directory and write a working configuration.
 
 Detection covers Go, Node, Python, Ruby, Rust and static sites. If there is no
-Dockerfile, a multi-stage one is generated for the detected stack. Everything
-written is a starting point meant to be edited and committed — buidl never
+Dockerfile, a multi-stage one is generated for the detected stack. Common
+changes go through ` + "`buidl add`" + `, ` + "`buidl environment`" + `, and
+` + "`buidl variable`" + `; edit the file for advanced cases. buidl never
 regenerates these files behind your back.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -119,7 +120,8 @@ regenerates these files behind your back.`,
 			a.log.Info("")
 			a.log.Info("next steps:")
 			a.log.Info("  1. review buidl.yaml (set proxy.host, infra.servers, and certManagerEmail)")
-			a.log.Info("  2. buidl deploy")
+			a.log.Info("  2. buidl add --database postgres   # optional")
+			a.log.Info("  3. buidl deploy")
 			return nil
 		},
 	}

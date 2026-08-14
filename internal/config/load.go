@@ -54,7 +54,7 @@ type Result struct {
 
 // Load finds, parses, overlays, interpolates, defaults and validates a config.
 func Load(opts LoadOptions) (*Result, error) {
-	path, err := resolvePath(opts)
+	path, err := ResolvePath(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -110,8 +110,8 @@ func Load(opts LoadOptions) (*Result, error) {
 	return &Result{Config: cfg, Path: path, Root: root, Environments: envNames}, nil
 }
 
-// resolvePath honors an explicit path or walks up from Dir looking for a config.
-func resolvePath(opts LoadOptions) (string, error) {
+// ResolvePath honors an explicit path or walks up from Dir looking for a config.
+func ResolvePath(opts LoadOptions) (string, error) {
 	if opts.Path != "" {
 		abs, err := filepath.Abs(opts.Path)
 		if err != nil {

@@ -45,7 +45,7 @@ slightly wrong costs far less than an applied one that is.
 
 **Secret values are never printed.** Plan output routinely ends up in a pull
 request or a CI log. Secret changes are reported by key name only, and
-`env list` reports presence and length. There are tests that fail if a value
+`variable list` reports presence and length. There are tests that fail if a value
 reaches any output path.
 
 **Shell arguments are escaped.** Every value interpolated into a remote command

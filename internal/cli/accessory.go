@@ -140,7 +140,7 @@ func (a *App) accessoryRequest(ctx context.Context) (*kubernetes.Target, deploy.
 
 	if len(a.cfg.Accessories) == 0 {
 		return nil, deploy.Request{}, fmt.Errorf("no accessories declared for environment %q\n\n"+
-			"hint: add them under `accessories` in %s", a.cfg.Environment, a.path)
+			"hint: `buidl add --database postgres`, or add them under `accessories` in %s", a.cfg.Environment, a.path)
 	}
 
 	if a.cfg.Deploy.Target != "kubernetes" {

@@ -59,7 +59,8 @@ Needs a kubeconfig and a BuildKit endpoint (see [Requirements](#requirements)).
 ```sh
 cd my-app
 buidl init --registry ghcr.io/myorg
-# edit buidl.yaml: set proxy.host, infra.servers, and certManagerEmail
+# set proxy.host, infra.servers, and certManagerEmail if you need them
+buidl add --database postgres   # optional
 buidl deploy
 ```
 
@@ -143,6 +144,14 @@ environments:
 
 Environments deep-merge onto the base. Maps merge key by key. Sequences are replaced, so `platforms: [linux/arm64]` in an overlay means exactly that list.
 
+```sh
+buidl environment list
+buidl environment new qa --host qa.example.com
+buidl environment set staging
+```
+
+`environment` (alias `env`) edits the overlays. It does not create or destroy cluster objects.
+
 ### Variables
 
 `${VAR}`, `${VAR:-default}`, and `${VAR:?why it is needed}` are expanded after the YAML is parsed, so a value with YAML metacharacters cannot break the file structure.
@@ -182,7 +191,7 @@ The process environment outranks every file, so CI injection is never overridden
 
 Values go into a Kubernetes Secret, never into `buidl.yaml`. A checksum of the resolved secrets is annotated on the pod template, so changing a secret value rolls the pods.
 
-`buidl env list` prints each variable, its kind, and where it came from. Secrets show as `set, N chars`, never the value.
+`buidl variable list` (or `var` / `vars`) prints each variable, its kind, and where it came from. Secrets show as `set, N chars`, never the value.
 
 For secrets already in the cluster (External Secrets, Vault), use `env.secretRefs`.
 
@@ -215,17 +224,23 @@ Push credentials come from the standard Docker config (`docker login`, `gcloud a
 
 ### Accessories
 
-Databases, caches, and queues sit next to the app in the same file. A first `buidl deploy` creates any accessory that is not already in the cluster. Later deploys leave existing accessories alone — including ones that have drifted — so shipping a web change cannot restart a database.
+Databases, caches, and queues sit next to the app in the same file. The usual way to add one is a command, not an edit:
+
+```sh
+buidl add --database postgres
+buidl add --database redis
+```
+
+That writes `type: postgres` (or `redis`) and generates `POSTGRES_PASSWORD` plus `DATABASE_URL` into `.buidl/secrets`. Image, port, volume and mount path are filled at load. A first `buidl deploy` creates any accessory that is not already in the cluster. Later deploys leave existing accessories alone — including ones that have drifted — so shipping a web change cannot restart a database.
 
 ```yaml
 accessories:
   postgres:
-    image: postgres:17
-    port: 5432
-    storage: 20Gi
-    env:
-      secret: [POSTGRES_PASSWORD]
+    type: postgres
+    # image, port, storage, and POSTGRES_PASSWORD are defaulted
 ```
+
+An explicit `image` / `storage` still wins. Untyped accessories with a full spec keep working.
 
 Each accessory becomes a StatefulSet plus a headless Service. Inside the namespace, `postgres` resolves as `<app>-postgres`.
 
@@ -412,7 +427,9 @@ Unchanged objects are listed too. `--detailed` adds the full YAML diff. Secret c
 | `logs` | stream logs (`-F` to follow) |
 | `manifest` | print the YAML buidl would apply |
 | `config show` / `validate` / `environments` | inspect resolved config |
-| `env list` | variables and where they resolved from |
+| `environment` / `env` `list` `new` `set` `delete` | manage environment overlays |
+| `variable` / `var` `list` `set` `delete` | inspect and set release variables |
+| `add --database` / `--service` | write a database or this app's host into the file |
 | `hooks` | which lifecycle hooks are enabled |
 | `accessory plan` / `apply` | reconcile databases and caches |
 | `cluster ...` | inspect or tear down a buidl-managed cluster |

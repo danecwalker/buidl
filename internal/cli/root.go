@@ -73,12 +73,15 @@ immutable, digest-pinned releases.
 Every deploy is a release you can inspect, promote, and roll back:
 
   buidl init                        detect the project and write buidl.yaml
+  buidl add --database postgres     add a Postgres accessory to the stack
+  buidl environment list            list staging, production, preview, ...
   buidl deploy                      build, push, and roll out (staging by default)
   buidl plan -e production          show exactly what would change
   buidl promote --from staging --to production
                                     deploy staging's exact image to production
   buidl rollback -e production      revert to the previous release
-  buidl destroy -e preview          tear down a preview environment`,
+  buidl destroy -e preview          tear down a preview environment
+  buidl variable list               inspect release variables (never prints secrets)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       Version,
@@ -101,6 +104,7 @@ Every deploy is a release you can inspect, promote, and roll back:
 
 	root.AddCommand(
 		newInitCmd(app),
+		newAddCmd(app),
 		newBuildCmd(app),
 		newDeployCmd(app),
 		newPlanCmd(app),
@@ -114,7 +118,8 @@ Every deploy is a release you can inspect, promote, and roll back:
 		newConfigCmd(app),
 		newClusterCmd(app),
 		newAccessoryCmd(app),
-		newEnvCmd(app),
+		newEnvironmentCmd(app),
+		newVariableCmd(app),
 		newHooksCmd(app),
 	)
 

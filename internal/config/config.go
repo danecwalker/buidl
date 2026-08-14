@@ -315,6 +315,10 @@ type Proxy struct {
 // deploys never update them, so an app rollout cannot restart a database.
 // `buidl accessory apply` is the reconcile path.
 type Accessory struct {
+	// Type selects a built-in accessory (`postgres`, `redis`). When set,
+	// omitted image/port/storage/env are filled at load so `type: postgres`
+	// is a complete spec. An unknown type is an error.
+	Type  string   `yaml:"type"`
 	Image string   `yaml:"image"`
 	Port  int32    `yaml:"port"`
 	Env   Env      `yaml:"env"`

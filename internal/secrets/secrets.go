@@ -68,6 +68,10 @@ const (
 	SourceCommon      Source = "secrets-common"
 	SourceShared      Source = "secrets"
 	SourceEnvironment Source = "secrets.<env>"
+	// SourceDerived is a value synthesized from a typed accessory (for example
+	// DATABASE_URL from POSTGRES_PASSWORD). It is not stored; it is computed
+	// at resolve time when the name is declared and no other source set it.
+	SourceDerived Source = "derived"
 )
 
 // Options configures resolution.
@@ -136,7 +140,7 @@ func Resolve(opts Options) (*Resolution, error) {
 	}
 
 	if len(opts.Names) == 0 {
-		// Still report what was found, so `env list` can show a project its
+		// Still report what was found, so `variable list` can show a project its
 		// undeclared variables even with nothing declared yet.
 		res.Discovered = undeclared(layers, nil)
 		return res, nil
