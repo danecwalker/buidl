@@ -105,6 +105,119 @@ func TestUpdateInstallsAndReplaces(t *testing.T) {
 	}
 }
 
+func TestUpdateRelocatesWhenDestNotWritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a 0555 directory")
+	}
+	payload := []byte("relocated-buidl")
+	srv := startCLIReleaseServer(t, "v9.9.9", payload)
+
+	locked := t.TempDir()
+	dest := filepath.Join(locked, "buidl")
+	if err := os.WriteFile(dest, []byte("old-system"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUIDL_INSTALL_DIR", "")
+
+	app, out := newTestApp(t, ui.ModePlain)
+	app.opts.timeout = time.Minute
+	app.updater = releaseClient(t, srv, "v0.1.6")
+	app.updateDest = dest
+
+	cmd := newUpdateCmd(app)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The system copy must stay put — we cannot write it.
+	old, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(old) != "old-system" {
+		t.Errorf("unwritable dest was overwritten: %q", old)
+	}
+
+	got, err := os.ReadFile(filepath.Join(home, ".local", "bin", "buidl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("user dest = %q, want %q", got, payload)
+	}
+	text := out.String()
+	if !strings.Contains(text, "is not writable") {
+		t.Errorf("should say why it relocated:\n%s", text)
+	}
+	if !strings.Contains(text, "sudo ln -s") {
+		t.Errorf("should tell the user how to point PATH at the new binary:\n%s", text)
+	}
+}
+
+func TestUpdateRelocatesWhenAlreadyCurrent(t *testing.T) {
+	// A first `sudo buidl update` leaves the new version in /usr/local/bin.
+	// The next run without sudo must still move it, or sudo never goes away.
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a 0555 directory")
+	}
+	payload := []byte("already-current-relocated")
+	srv := startCLIReleaseServer(t, "v0.1.6", payload)
+
+	locked := t.TempDir()
+	dest := filepath.Join(locked, "buidl")
+	if err := os.WriteFile(dest, []byte("old-system"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUIDL_INSTALL_DIR", "")
+
+	app, out := newTestApp(t, ui.ModePlain)
+	app.opts.timeout = time.Minute
+	app.updater = releaseClient(t, srv, "v0.1.6")
+	app.updateDest = dest
+
+	cmd := newUpdateCmd(app)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	old, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(old) != "old-system" {
+		t.Errorf("unwritable dest was overwritten: %q", old)
+	}
+
+	got, err := os.ReadFile(filepath.Join(home, ".local", "bin", "buidl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("user dest = %q, want %q", got, payload)
+	}
+	text := out.String()
+	if !strings.Contains(text, "is not writable") {
+		t.Errorf("should say why it relocated:\n%s", text)
+	}
+	if !strings.Contains(text, "sudo ln -s") {
+		t.Errorf("should tell the user how to point PATH at the new binary:\n%s", text)
+	}
+}
+
 func TestUpdateSkipsWhenCurrent(t *testing.T) {
 	srv := startCLIReleaseServer(t, "v0.1.6", []byte("new"))
 	dest := filepath.Join(t.TempDir(), "buidl")

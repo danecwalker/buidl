@@ -5,8 +5,10 @@
 #
 # This is the supported way to install a release binary. It detects the
 # platform, verifies SHA-256 against checksums.txt from the same GitHub
-# release, and writes `buidl` to BUIDL_INSTALL_DIR (default /usr/local/bin).
-# If that directory is not writable, the script asks for sudo via /dev/tty.
+# release, and writes `buidl` to BUIDL_INSTALL_DIR (default ~/.local/bin).
+# That directory is user-owned, so later `buidl update` does not need sudo.
+# If ~/.local/bin is not on PATH, the script links /usr/local/bin/buidl at
+# it (sudo once). Set BUIDL_INSTALL_DIR to pick another location.
 #
 # Do not pipe this to `sudo bash`. The installer prompts itself when it
 # needs a password; wrapping the whole script in sudo is unnecessary, and
@@ -132,7 +134,7 @@ resolve_install_dir() {
     printf '%s' "$INSTALL_DIR"
     return
   fi
-  printf '/usr/local/bin'
+  printf '%s/.local/bin' "${HOME:?HOME is not set}"
 }
 
 # True when this user cannot create or write dest without privilege.
@@ -165,9 +167,9 @@ as_root() {
   fi
 }
 
-# Default dest is /usr/local/bin so `buidl` is on PATH. When it is not
-# writable, prompt via /dev/tty (stdin is the piped script). Passwordless
-# sudo skips the prompt. Never sudo -S.
+# Default dest is ~/.local/bin so updates stay user-owned. When a dest
+# (or the PATH symlink) is not writable, prompt via /dev/tty (stdin is
+# the piped script). Passwordless sudo skips the prompt. Never sudo -S.
 prepare_dest() {
   need_sudo=0
   if ! needs_privilege "$dest_dir"; then
@@ -188,6 +190,71 @@ prepare_dest() {
   fi
   need_sudo=1
   as_root mkdir -p -- "$dest_dir"
+}
+
+on_path() {
+  case ":${PATH}:" in
+    *":$1:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+print_path_hint() {
+  local dir=$1
+  info "add ${dir} to PATH"
+  case ${SHELL##*/} in
+    fish) info "  fish_add_path ${dir}" ;;
+    zsh)  info "  echo 'export PATH=\"${dir}:\$PATH\"' >> ~/.zshrc && hash -r" ;;
+    *)    info "  echo 'export PATH=\"${dir}:\$PATH\"' >> ~/.bashrc && hash -r" ;;
+  esac
+}
+
+# Point a PATH directory at the user-owned binary so `buidl` works without
+# putting ~/.local/bin on PATH. Best-effort: a failed link must not undo
+# a successful install. Must not call fail.
+install_path_link() {
+  local link_dir link
+  if on_path "$dest_dir"; then
+    return 0
+  fi
+
+  link_dir="${BUIDL_PATH_LINK_DIR:-/usr/local/bin}"
+  if ! on_path "$link_dir"; then
+    return 1
+  fi
+
+  link="$link_dir/buidl"
+  if ! prepare_link_dir "$link_dir"; then
+    return 1
+  fi
+
+  # ln -sf will not replace a regular file (the previous default dest).
+  as_root rm -f -- "$link" || return 1
+  as_root ln -s -- "$dest" "$link" || return 1
+  info "linked      $link -> $dest"
+  return 0
+}
+
+# Like prepare_dest, but returns 1 instead of exiting so a PATH symlink
+# is optional.
+prepare_link_dir() {
+  local dir=$1
+  need_sudo=0
+  if ! needs_privilege "$dir"; then
+    mkdir -p -- "$dir" 2>/dev/null || return 1
+    [ -w "$dir" ]
+    return
+  fi
+  command -v sudo >/dev/null 2>&1 || return 1
+  info "needs sudo to link $dir/buidl"
+  if ! sudo -n -v >/dev/null 2>&1; then
+    if ! { true </dev/tty >/dev/tty; } 2>/dev/null; then
+      return 1
+    fi
+    sudo -p "     password for %p: " -v </dev/tty || return 1
+  fi
+  need_sudo=1
+  as_root mkdir -p -- "$dir"
 }
 
 latest_tag() {
@@ -303,12 +370,17 @@ if ver=$("$dest" --version 2>/dev/null); then
   info "$ver"
 fi
 
-case ":${PATH}:" in
-  *":${dest_dir}:"*) ;;
-  *)
-    info "add ${dest_dir} to PATH"
-    ;;
-esac
+# A PATH symlink is only for the default ~/.local/bin install. An explicit
+# BUIDL_INSTALL_DIR is the dest the user asked for; do not also touch
+# /usr/local/bin.
+if [ -z "$INSTALL_DIR" ]; then
+  install_path_link || print_path_hint "$dest_dir"
+else
+  case ":${PATH}:" in
+    *":${dest_dir}:"*) ;;
+    *) print_path_hint "$dest_dir" ;;
+  esac
+fi
 
 info "next         buidl init && buidl deploy"
 info "later        buidl update"

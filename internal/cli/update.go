@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +25,12 @@ func newUpdateCmd(a *App) *cobra.Command {
 
 The download is checked against checksums.txt from the same release. After a
 command notices a newer version, this is how you install it.
+
+If this binary lives in a directory you cannot write (typically
+/usr/local/bin), the new file is written to ~/.local/bin instead. Point
+the old path at it once so later updates do not need sudo. Run this
+command without sudo; wrapping it in sudo keeps the binary in a
+root-owned directory.
 
   buidl update
   buidl update --check`,
@@ -73,17 +80,35 @@ func (a *App) runUpdate(checkOnly bool) error {
 		return nil
 	}
 
-	if !newer && update.Parseable(current) {
-		a.log.Success("already up to date (%s)", latest)
-		return nil
-	}
-
 	dest := a.updateDest
 	if dest == "" {
 		dest, err = update.Executable()
 		if err != nil {
 			return err
 		}
+	}
+	previous := dest
+
+	// A binary in /usr/local/bin needs sudo to replace. Relocate even
+	// when the version is current, otherwise a first `sudo buidl update`
+	// would leave the new binary in a root-owned path forever.
+	if !update.CanReplace(dest) {
+		alt, altErr := update.UserInstallPath(dest)
+		if altErr != nil {
+			if !newer && update.Parseable(current) {
+				a.log.Success("already up to date (%s)", latest)
+				a.log.Info("%s is not writable; later updates will need sudo", dest)
+				return nil
+			}
+			return fmt.Errorf("cannot replace %s: %w\n\nhint: install to a directory you own:\n  curl -fsSL https://raw.githubusercontent.com/danecwalker/buidl/main/install.sh | bash", dest, altErr)
+		}
+		a.log.Info("%s is not writable; installing to %s", dest, alt)
+		dest = alt
+	}
+
+	if !newer && update.Parseable(current) && previous == dest {
+		a.log.Success("already up to date (%s)", latest)
+		return nil
 	}
 
 	a.log.Step("downloading " + client.PlatformAsset())
@@ -94,7 +119,40 @@ func (a *App) runUpdate(checkOnly bool) error {
 		return err
 	}
 	a.log.Success("installed %s to %s", latest, dest)
+	if previous != dest {
+		a.hintRelocatedUpdate(previous, dest)
+	} else if os.Geteuid() == 0 {
+		a.log.Info("running as root; later updates will still need sudo")
+		a.log.Info("run `buidl update` without sudo to move the binary to ~/.local/bin")
+	}
 	return nil
+}
+
+// hintRelocatedUpdate tells the user how to retire a leftover system
+// binary so PATH picks up the user-owned copy. We do not exec sudo:
+// that would hang tests and surprise anyone who did not type it.
+func (a *App) hintRelocatedUpdate(previous, dest string) {
+	if err := replaceWithLink(dest, previous); err == nil {
+		a.log.Info("pointed %s at %s; later updates will not need sudo", previous, dest)
+		return
+	}
+	a.log.Info("%s is still first on PATH. Point it at the new binary once:", previous)
+	a.log.Info("  sudo rm -f %s", previous)
+	a.log.Info("  sudo ln -s %s %s", dest, previous)
+	a.log.Info("or add %s to PATH ahead of %s", filepath.Dir(dest), filepath.Dir(previous))
+}
+
+func replaceWithLink(target, link string) error {
+	if target == "" || link == "" || target == link {
+		return fmt.Errorf("no link to create")
+	}
+	if !update.CanReplace(link) {
+		return fmt.Errorf("cannot write %s", link)
+	}
+	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Symlink(target, link)
 }
 
 func displayVersion(v string) string {
