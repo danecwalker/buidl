@@ -77,7 +77,8 @@ Every deploy is a release you can inspect, promote, and roll back:
   buidl plan -e production          show exactly what would change
   buidl promote --from staging --to production
                                     deploy staging's exact image to production
-  buidl rollback -e production      revert to the previous release`,
+  buidl rollback -e production      revert to the previous release
+  buidl destroy -e preview          tear down a preview environment`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       Version,
@@ -105,6 +106,7 @@ Every deploy is a release you can inspect, promote, and roll back:
 		newPlanCmd(app),
 		newPromoteCmd(app),
 		newRollbackCmd(app),
+		newDestroyCmd(app),
 		newStatusCmd(app),
 		newReleasesCmd(app),
 		newLogsCmd(app),

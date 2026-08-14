@@ -67,7 +67,7 @@ type Target struct {
 	Namespace string
 
 	restConfig *rest.Config
-	clientset  *kubernetes.Clientset
+	clientset  kubernetes.Interface
 	dynamic    dynamic.Interface
 	mapper     meta.RESTMapper
 	discovery  discovery.DiscoveryInterface

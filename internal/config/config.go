@@ -174,6 +174,14 @@ type Kubernetes struct {
 	// CreateNamespace makes `deploy` create the namespace if absent. Handy for
 	// ephemeral preview environments.
 	CreateNamespace bool `yaml:"createNamespace"`
+	// Ephemeral marks this environment as a disposable preview. `buidl destroy`
+	// deletes the whole namespace. Staging and production must never set this:
+	// their accessories and release history live in the namespace.
+	//
+	// A preview-like environment with createNamespace and a slug-derived
+	// namespace is treated as ephemeral even when this is unset, so existing
+	// configs keep working. Set false to opt out.
+	Ephemeral *bool `yaml:"ephemeral,omitempty"`
 }
 
 // Healthcheck drives both the readiness probe and the rollout gate. A release

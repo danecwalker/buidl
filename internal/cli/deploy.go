@@ -8,6 +8,7 @@ import (
 
 	"github.com/danecwalker/buidl/internal/build"
 	"github.com/danecwalker/buidl/internal/cluster"
+	"github.com/danecwalker/buidl/internal/config"
 	"github.com/danecwalker/buidl/internal/deploy"
 	"github.com/danecwalker/buidl/internal/gitinfo"
 	"github.com/danecwalker/buidl/internal/hooks"
@@ -336,11 +337,7 @@ func (a *App) clusterDescription() string {
 
 // isProductionLike recognizes the environment names that warrant a confirmation.
 func isProductionLike(env string) bool {
-	switch env {
-	case "production", "prod", "live", "main":
-		return true
-	}
-	return false
+	return config.ProductionLike(env)
 }
 
 // newPlanCmd shows what a deploy would change.

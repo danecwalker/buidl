@@ -251,12 +251,14 @@ environments:
 
   # Per-branch preview environments. BUIDL_SLUG is derived from the branch name
   # (or the PR number in CI), so a new branch needs no configuration at all.
+  # buidl destroy -e preview deletes the namespace when the PR closes.
   preview:
     deploy:
       replicas: 1
       kubernetes:
         namespace: %s-preview-${BUIDL_SLUG}
         createNamespace: true
+        ephemeral: true
     proxy:
       host: ${BUIDL_SLUG}.preview.example.com
       ssl: true

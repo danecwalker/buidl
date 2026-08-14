@@ -6,6 +6,7 @@ package cli
 //
 //   - Pull requests get a preview environment and a plan, so a reviewer sees both
 //     the running app and the infrastructure delta before merging.
+//   - Closing a pull request tears the preview namespace down.
 //   - Merges to main deploy to staging automatically.
 //   - Production is a promotion of staging's exact digest, gated on a GitHub
 //     environment approval — never a rebuild.
@@ -19,6 +20,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # closed is not in GitHub's default set; without it the preview namespace
+    # would leak after merge.
+    types: [opened, synchronize, reopened, closed]
   # Manual promotion to production.
   workflow_dispatch:
     inputs:
@@ -40,7 +44,7 @@ env:
 jobs:
   # ---------------------------------------------------------------- preview ---
   preview:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -100,6 +104,34 @@ jobs:
         # Shows the reviewer what merging would change in production, without
         # touching it.
         run: buidl plan -e production --detailed
+
+  # ------------------------------------------------------- preview teardown ---
+  teardown:
+    # Fires on merge and on close-without-merge. Staging is a separate push
+    # to main; coupling the two would leak previews on a failed staging
+    # deploy and on PRs that never land.
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install buidl
+        run: |
+          curl -fsSL https://github.com/danecwalker/buidl/releases/latest/download/buidl-linux-amd64 -o /usr/local/bin/buidl
+          chmod +x /usr/local/bin/buidl
+
+      - name: Configure cluster access
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Destroy preview
+        # Same BUIDL_SLUG as the deploy job (pr-<n> from GITHUB_REF), so this
+        # deletes the namespace that job created. --yes is required in CI.
+        run: buidl destroy -e preview --yes
 
   # ---------------------------------------------------------------- staging ---
   staging:
