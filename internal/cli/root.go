@@ -24,6 +24,7 @@ import (
 	"github.com/danecwalker/buidl/internal/release"
 	"github.com/danecwalker/buidl/internal/secrets"
 	"github.com/danecwalker/buidl/internal/ui"
+	"github.com/danecwalker/buidl/internal/update"
 )
 
 // Version is set at link time via -ldflags.
@@ -57,6 +58,14 @@ type App struct {
 	// gitLoaded guards against re-running git for every config load in commands
 	// that resolve several environments.
 	gitLoaded bool
+
+	// updater and updateDest are injected by tests. Production leaves them
+	// empty so update talks to GitHub and replaces os.Executable.
+	updater    *update.Client
+	updateDest string
+
+	skipUpdateNotice bool
+	updateResult     chan update.Result
 }
 
 // Execute builds the command tree and runs it. It returns the process exit code.
@@ -81,7 +90,8 @@ Every deploy is a release you can inspect, promote, and roll back:
                                     deploy staging's exact image to production
   buidl rollback -e production      revert to the previous release
   buidl destroy -e preview          tear down a preview environment
-  buidl variable list               inspect release variables (never prints secrets)`,
+  buidl variable list               inspect release variables (never prints secrets)
+  buidl update                      install the latest buidl release`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       Version,
@@ -121,7 +131,12 @@ Every deploy is a release you can inspect, promote, and roll back:
 		newEnvironmentCmd(app),
 		newVariableCmd(app),
 		newHooksCmd(app),
+		newUpdateCmd(app),
 	)
+
+	// The lookup starts before the command so a slow `deploy` has already
+	// heard back by the time we print. A cache hit is a file read.
+	app.startUpdateCheck()
 
 	if err := root.Execute(); err != nil {
 		// The printer may not exist yet if setup itself failed.
@@ -130,11 +145,14 @@ Every deploy is a release you can inspect, promote, and roll back:
 		} else {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		}
+		app.maybeNotifyUpdate()
 		return exitCode(err)
 	}
 	if app.log != nil && app.log.Failed() {
+		app.maybeNotifyUpdate()
 		return 1
 	}
+	app.maybeNotifyUpdate()
 	return 0
 }
 
