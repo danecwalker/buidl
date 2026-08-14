@@ -5,11 +5,12 @@
 #
 # This is the supported way to install a release binary. It detects the
 # platform, verifies SHA-256 against checksums.txt from the same GitHub
-# release, and writes `buidl` to BUIDL_INSTALL_DIR (default /usr/local/bin,
-# or ~/.local/bin when that is not writable).
+# release, and writes `buidl` to BUIDL_INSTALL_DIR (default /usr/local/bin).
+# If that directory is not writable, the script asks for sudo via /dev/tty.
 #
-# Do not pipe this to `sudo bash`. A password prompt cannot work when stdin
-# is the script; install to a writable directory instead.
+# Do not pipe this to `sudo bash`. The installer prompts itself when it
+# needs a password; wrapping the whole script in sudo is unnecessary, and
+# `sudo -S` would treat the rest of the script as the password.
 set -euo pipefail
 
 BASE_URL="${BUIDL_BASE_URL:-https://github.com/danecwalker/buidl}"
@@ -131,15 +132,62 @@ resolve_install_dir() {
     printf '%s' "$INSTALL_DIR"
     return
   fi
-  if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
-    printf '/usr/local/bin'
+  printf '/usr/local/bin'
+}
+
+# True when this user cannot create or write dest without privilege.
+needs_privilege() {
+  local dir parent next
+  dir=$1
+  if [ "$(id -u)" -eq 0 ]; then
+    return 1
+  fi
+  if [ -d "$dir" ]; then
+    [ ! -w "$dir" ]
     return
   fi
-  if [ -w /usr/local/bin/buidl ] 2>/dev/null; then
-    printf '/usr/local/bin'
+  parent=$dir
+  while [ ! -e "$parent" ]; do
+    next=$(dirname "$parent")
+    if [ "$next" = "$parent" ]; then
+      break
+    fi
+    parent=$next
+  done
+  [ ! -w "$parent" ]
+}
+
+as_root() {
+  if [ "${need_sudo:-0}" -eq 1 ]; then
+    sudo -p "     password for %p: " -- "$@"
+  else
+    "$@"
+  fi
+}
+
+# Default dest is /usr/local/bin so `buidl` is on PATH. When it is not
+# writable, prompt via /dev/tty (stdin is the piped script). Passwordless
+# sudo skips the prompt. Never sudo -S.
+prepare_dest() {
+  need_sudo=0
+  if ! needs_privilege "$dest_dir"; then
+    mkdir -p -- "$dest_dir"
+    [ -w "$dest_dir" ] || fail "cannot write to $dest_dir (set BUIDL_INSTALL_DIR to a writable directory)"
     return
   fi
-  printf '%s/.local/bin' "${HOME:?}"
+
+  command -v sudo >/dev/null 2>&1 ||
+    fail "sudo is required to write $dest_dir (set BUIDL_INSTALL_DIR to a writable directory)"
+  info "needs sudo to write $dest_dir"
+  if ! sudo -n -v >/dev/null 2>&1; then
+    if ! { true </dev/tty >/dev/tty; } 2>/dev/null; then
+      fail "cannot write to $dest_dir and cannot prompt for sudo (set BUIDL_INSTALL_DIR to a writable directory)"
+    fi
+    sudo -p "     password for %p: " -v </dev/tty ||
+      fail "sudo is required to write $dest_dir (set BUIDL_INSTALL_DIR to a writable directory)"
+  fi
+  need_sudo=1
+  as_root mkdir -p -- "$dest_dir"
 }
 
 latest_tag() {
@@ -209,14 +257,24 @@ fi
 info "version      $VERSION"
 
 dest_dir=$(resolve_install_dir)
-mkdir -p "$dest_dir"
-if [ ! -w "$dest_dir" ]; then
-  fail "cannot write to $dest_dir (set BUIDL_INSTALL_DIR or pick a writable location)"
-fi
+info "install dir  $dest_dir"
+need_sudo=0
+prepare_dest
 dest="$dest_dir/buidl"
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+install_tmp=""
+cleanup() {
+  rm -rf "$tmp"
+  if [ -n "$install_tmp" ]; then
+    if [ "${need_sudo:-0}" -eq 1 ]; then
+      sudo -n rm -f -- "$install_tmp" 2>/dev/null || true
+    else
+      rm -f -- "$install_tmp"
+    fi
+  fi
+}
+trap cleanup EXIT
 
 step "downloading   $asset"
 download "$BASE_URL/releases/download/${VERSION}/checksums.txt" "$tmp/checksums.txt" "$tmp/curl-sums.err"
@@ -234,9 +292,10 @@ info "checksum     ok"
 
 # Same-directory rename so a crash cannot leave a half-written dest.
 install_tmp="$dest_dir/.buidl-install-$$"
-cp "$tmp/$asset" "$install_tmp"
-chmod 755 "$install_tmp"
-mv -f "$install_tmp" "$dest"
+as_root cp -- "$tmp/$asset" "$install_tmp"
+as_root chmod 755 "$install_tmp"
+as_root mv -f -- "$install_tmp" "$dest"
+install_tmp=""
 
 ok "installed    $dest"
 
