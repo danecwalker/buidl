@@ -11,6 +11,16 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- `install.sh` writes the binary to `~/.local/bin` so `buidl update` does
+  not need sudo. If that directory is not on PATH, the script links
+  `/usr/local/bin/buidl` at it (sudo once). An existing root-owned
+  install is moved on the next `buidl update` (even when the version is
+  already current) and prints a one-time `sudo ln -s` hint. Run `buidl
+  update` without sudo; wrapping it in sudo keeps the binary in a
+  root-owned directory. Set `BUIDL_INSTALL_DIR` to pick another location.
+
 ## [0.2.2] — 2026-08-14
 
 ### Changed

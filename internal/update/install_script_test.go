@@ -82,7 +82,7 @@ func hideSudoPath(t *testing.T) string {
 	tools := []string{
 		"curl", "awk", "uname", "mkdir", "cp", "chmod", "mv", "mktemp",
 		"rm", "tr", "sed", "wc", "id", "dirname", "basename", "sleep",
-		"tail", "cat", "head", "true",
+		"tail", "cat", "head", "true", "ln",
 	}
 	if _, err := exec.LookPath("sha256sum"); err == nil {
 		tools = append(tools, "sha256sum")
@@ -291,5 +291,152 @@ func TestInstallScriptFailsWithoutSudoWhenDestNotWritable(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destDir, "buidl")); !os.IsNotExist(err) {
 		t.Errorf("failed install left a binary: %v", err)
+	}
+}
+
+func TestInstallScriptDefaultsToHomeLocalBin(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl not available")
+	}
+
+	version := "v9.9.9"
+	payload := []byte("#!/bin/sh\necho 'buidl version " + version + "'\n")
+	srv := startReleaseServer(t, version, payload)
+
+	home := t.TempDir()
+	userBin := filepath.Join(home, ".local", "bin")
+	binDir := t.TempDir()
+	failingSudo(t, binDir)
+
+	// userBin is on PATH so the script must not try to sudo a /usr/local/bin link.
+	cmd := exec.Command("bash", installScript(t))
+	cmd.Env = []string{
+		"PATH=" + userBin + string(os.PathListSeparator) + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + home,
+		"TMPDIR=" + t.TempDir(),
+		"BUIDL_BASE_URL=" + srv.URL,
+		"BUIDL_VERSION=" + version,
+		"NO_COLOR=1",
+		"TERM=dumb",
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.sh: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "needs sudo") {
+		t.Errorf("default dest is user-owned; should not sudo:\n%s", out)
+	}
+	got, err := os.ReadFile(filepath.Join(userBin, "buidl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("installed %q, want %q", got, payload)
+	}
+}
+
+func TestInstallScriptLinksWhenNotOnPath(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl not available")
+	}
+
+	version := "v9.9.9"
+	payload := []byte("#!/bin/sh\necho 'buidl version " + version + "'\n")
+	srv := startReleaseServer(t, version, payload)
+
+	home := t.TempDir()
+	linkDir := t.TempDir()
+	binDir := t.TempDir()
+	failingSudo(t, binDir)
+
+	cmd := exec.Command("bash", installScript(t))
+	cmd.Env = []string{
+		"PATH=" + linkDir + string(os.PathListSeparator) + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + home,
+		"TMPDIR=" + t.TempDir(),
+		"BUIDL_BASE_URL=" + srv.URL,
+		"BUIDL_VERSION=" + version,
+		"BUIDL_PATH_LINK_DIR=" + linkDir,
+		"NO_COLOR=1",
+		"TERM=dumb",
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install.sh: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "linked") {
+		t.Errorf("expected a PATH symlink:\n%s", out)
+	}
+	link := filepath.Join(linkDir, "buidl")
+	got, err := os.Readlink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".local", "bin", "buidl")
+	if got != want {
+		t.Errorf("symlink = %q, want %q", got, want)
+	}
+	body, err := os.ReadFile(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != string(payload) {
+		t.Errorf("linked binary = %q, want payload", body)
+	}
+}
+
+func TestInstallScriptPathHintWhenLinkFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a 0555 directory")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl not available")
+	}
+
+	version := "v9.9.9"
+	payload := []byte("#!/bin/sh\necho 'buidl version " + version + "'\n")
+	srv := startReleaseServer(t, version, payload)
+
+	home := t.TempDir()
+	linkDir := t.TempDir()
+	if err := os.Chmod(linkDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(linkDir, 0o755) })
+
+	// Do not append the process PATH: GitHub-hosted runners have
+	// passwordless sudo, and a leaked sudo would write the 0555 link dir.
+	cmd := exec.Command("bash", installScript(t))
+	cmd.Env = []string{
+		"PATH=" + linkDir + string(os.PathListSeparator) + hideSudoPath(t),
+		"HOME=" + home,
+		"TMPDIR=" + t.TempDir(),
+		"BUIDL_BASE_URL=" + srv.URL,
+		"BUIDL_VERSION=" + version,
+		"BUIDL_PATH_LINK_DIR=" + linkDir,
+		"NO_COLOR=1",
+		"TERM=dumb",
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install should succeed without the link: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "add ") || !strings.Contains(string(out), "PATH") {
+		t.Errorf("expected a PATH hint when the link cannot be created:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "bin", "buidl")); err != nil {
+		t.Fatalf("real binary missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(linkDir, "buidl")); !os.IsNotExist(err) {
+		t.Errorf("failed link left a file: %v", err)
 	}
 }
