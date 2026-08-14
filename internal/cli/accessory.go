@@ -26,10 +26,10 @@ func newAccessoryCmd(a *App) *cobra.Command {
 		Short:   "Manage supporting services (databases, caches, queues)",
 		Long: `Manage the services declared under ` + "`accessories`" + ` in buidl.yaml.
 
-Accessories are deliberately not reconciled by ` + "`buidl deploy`" + `. An app
-deploy runs many times a day and replaces every pod it owns; a restarted
-database must never be a side effect of shipping a web app. Reconciling one is
-always something you ask for by name.`,
+A first ` + "`buidl deploy`" + ` creates any accessory that is not already in the
+cluster. Later deploys leave existing accessories alone, even if they have
+drifted. Reconciling one — which can restart a database — is always something
+you ask for by name.`,
 	}
 
 	cmd.AddCommand(newAccessoryPlanCmd(a), newAccessoryApplyCmd(a))
@@ -44,9 +44,9 @@ func newAccessoryPlanCmd(a *App) *cobra.Command {
 		Short: "Show what reconciling the accessories would change",
 		Long: `Dry-run the accessories against the API server and report the changes.
 
-This is also how you see drift: because an ordinary deploy leaves accessories
-alone, this is the only command that will tell you an accessory no longer
-matches its configuration.`,
+This is also how you see drift: a later deploy creates missing accessories
+but never updates existing ones, so this is the command that will tell you
+an accessory no longer matches its configuration.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()

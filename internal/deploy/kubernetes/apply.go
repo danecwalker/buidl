@@ -90,6 +90,8 @@ func (t *Target) get(ctx context.Context, obj Object) (*unstructured.Unstructure
 // Plan implements deploy.Target by dry-running every object and diffing the
 // result against what is live.
 func (t *Target) Plan(ctx context.Context, req deploy.Request) (*deploy.Plan, error) {
+	t.resolveScale(ctx)
+
 	objs, err := t.Render(req)
 	if err != nil {
 		return nil, err

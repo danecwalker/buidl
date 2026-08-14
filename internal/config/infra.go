@@ -177,6 +177,23 @@ func applyInfraDefaults(c *Config) {
 	inv := &inventory.Inventory{Servers: in.Servers}
 	inventory.Normalize(inv)
 	in.Servers = inv.Servers
+
+	// proxy.ssl needs cert-manager. When the user already gave an ACME address,
+	// turning the addon on is the whole remaining step — requiring a second
+	// boolean next to the email is ceremony they will skip, then wonder why
+	// TLS never issues.
+	if c.Proxy.SSL && in.Addons.CertManagerEmail != "" {
+		in.Addons.CertManager = true
+	}
+
+	// deploy.autoscale needs metrics-server. k3s already ships it unless the
+	// user disabled the bundled component; everywhere else, install ours.
+	if c.Deploy.Autoscale != nil && !in.Addons.MetricsServer {
+		bundled := in.Kubernetes.Distribution == DistributionK3s && !slicesContains(in.Kubernetes.Disable, "metrics-server")
+		if !bundled {
+			in.Addons.MetricsServer = true
+		}
+	}
 }
 
 // validateInfra checks the infra block.

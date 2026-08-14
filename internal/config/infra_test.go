@@ -203,36 +203,7 @@ infra:
 `,
 			wantErr: "infra.addons.certManager` is not",
 		},
-		{
-			name: "autoscale on rke2 without metrics-server",
-			yaml: `
-app: api
-image: ghcr.io/acme/api
-deploy:
-  autoscale: {min: 1, max: 5, cpuPercent: 70}
-infra:
-  kubernetes:
-    distribution: rke2
-  servers:
-    - {host: 10.0.0.1, role: control-plane}
-`,
-			wantErr: "needs metrics-server",
-		},
-		{
-			name: "autoscale when metrics-server is disabled",
-			yaml: `
-app: api
-image: ghcr.io/acme/api
-deploy:
-  autoscale: {min: 1, max: 5, cpuPercent: 70}
-infra:
-  kubernetes:
-    disable: [metrics-server]
-  servers:
-    - {host: 10.0.0.1, role: control-plane}
-`,
-			wantErr: "needs metrics-server",
-		},
+
 		{
 			name: "invalid ssh port",
 			yaml: `
@@ -258,6 +229,67 @@ infra:
 				t.Errorf("error = %q, want it to contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestAutoscaleOnRKE2EnablesMetricsServer(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: api
+image: ghcr.io/acme/api
+deploy:
+  autoscale: {min: 1, max: 5, cpuPercent: 70}
+infra:
+  kubernetes:
+    distribution: rke2
+  servers:
+    - {host: 10.0.0.1, role: control-plane}
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("autoscale on rke2 should enable the metrics-server addon: %v", err)
+	}
+	if !res.Config.Infra.Addons.MetricsServer {
+		t.Error("expected infra.addons.metricsServer to be turned on")
+	}
+}
+
+func TestAutoscaleEnablesMetricsServerWhenBundledIsDisabled(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: api
+image: ghcr.io/acme/api
+deploy:
+  autoscale: {min: 1, max: 5, cpuPercent: 70}
+infra:
+  kubernetes:
+    disable: [metrics-server]
+  servers:
+    - {host: 10.0.0.1, role: control-plane}
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("disabling the bundled metrics-server should install the addon: %v", err)
+	}
+	if !res.Config.Infra.Addons.MetricsServer {
+		t.Error("expected infra.addons.metricsServer to be turned on")
+	}
+}
+
+func TestSSLWithEmailEnablesCertManager(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: api
+image: ghcr.io/acme/api
+proxy:
+  host: api.acme.com
+  ssl: true
+infra:
+  addons:
+    certManagerEmail: ops@acme.com
+  servers:
+    - {host: 10.0.0.1, role: control-plane}
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("ssl + certManagerEmail should enable cert-manager: %v", err)
+	}
+	if !res.Config.Infra.Addons.CertManager {
+		t.Error("expected infra.addons.certManager to be turned on")
 	}
 }
 

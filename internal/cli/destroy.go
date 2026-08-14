@@ -45,8 +45,10 @@ Examples:
 			if err := a.requireConfig(ctx); err != nil {
 				return err
 			}
-			if err := a.requireEnvironment(); err != nil {
-				return err
+			// Staging is implied for deploy and status. destroy must not inherit
+			// that: tearing down the wrong environment is worse than asking.
+			if a.opts.environment == "" {
+				return fmt.Errorf("`destroy` requires -e/--env so it cannot target the wrong environment")
 			}
 
 			staleAfter, err := parseStaleDuration(stale)

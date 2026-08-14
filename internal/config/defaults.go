@@ -12,6 +12,9 @@ const (
 	DefaultHooksPath       = ".buidl/hooks"
 	DefaultRetainReleases  = 10
 	DefaultCacheSuffix     = ":buildcache"
+	DefaultAutoscaleCPU    = int32(70)
+	DefaultRequestCPU      = "100m"
+	DefaultRequestMemory   = "128Mi"
 )
 
 // applyDefaults fills in omitted fields. It is idempotent.
@@ -61,15 +64,13 @@ func applyDefaults(c *Config) {
 	if c.Deploy.Port == 0 {
 		c.Deploy.Port = DefaultPort
 	}
-	if c.Deploy.Replicas == nil {
-		one := int32(1)
-		c.Deploy.Replicas = &one
-	}
 	if c.Deploy.Kubernetes.Namespace == "" {
 		c.Deploy.Kubernetes.Namespace = c.App
 	}
 
 	// --- healthcheck ---
+	// Applied before scale defaults: an HTTP probe is how we decide whether to
+	// turn on an HPA. A worker with only an exec probe stays at one replica.
 	hc := &c.Deploy.Healthcheck
 	if hc.Path == "" && len(hc.Command) == 0 {
 		hc.Path = DefaultHealthcheckPath
@@ -86,6 +87,8 @@ func applyDefaults(c *Config) {
 	if hc.FailureThreshold == 0 {
 		hc.FailureThreshold = 3
 	}
+
+	applyScaleDefaults(c)
 
 	// --- strategy ---
 	st := &c.Deploy.Strategy
@@ -171,4 +174,62 @@ func defaultMountPath(image string) string {
 	default:
 		return "/data"
 	}
+}
+
+// applyScaleDefaults chooses static replicas vs an HPA when the user omitted
+// both, then fills HPA bounds and the resource requests utilization needs.
+func applyScaleDefaults(c *Config) {
+	if c.Deploy.Replicas == nil && c.Deploy.Autoscale == nil {
+		switch {
+		case PreviewLike(c.Environment):
+			// A preview is one user kicking the tyres. Autoscaling it wastes
+			// cluster capacity and makes the namespace harder to reason about.
+			one := int32(1)
+			c.Deploy.Replicas = &one
+		case isHTTPApp(c):
+			c.Deploy.Autoscale = &Autoscale{CPUPercent: DefaultAutoscaleCPU}
+		default:
+			one := int32(1)
+			c.Deploy.Replicas = &one
+		}
+	}
+
+	as := c.Deploy.Autoscale
+	if as == nil {
+		if c.Deploy.Replicas == nil {
+			one := int32(1)
+			c.Deploy.Replicas = &one
+		}
+		return
+	}
+
+	if as.CPUPercent == 0 && as.MemoryPercent == 0 {
+		as.CPUPercent = DefaultAutoscaleCPU
+	}
+	if as.Min == 0 {
+		as.derivedMin = true
+	}
+	if as.Max == 0 {
+		as.derivedMax = true
+	}
+
+	// CPU/memory utilization is a ratio of usage to requests. Without requests
+	// the HPA cannot compute a signal and never scales.
+	if c.Deploy.Resources.Requests == nil {
+		c.Deploy.Resources.Requests = map[string]string{}
+	}
+	if c.Deploy.Resources.Requests["cpu"] == "" {
+		c.Deploy.Resources.Requests["cpu"] = DefaultRequestCPU
+	}
+	if c.Deploy.Resources.Requests["memory"] == "" {
+		c.Deploy.Resources.Requests["memory"] = DefaultRequestMemory
+	}
+
+	ResolveAutoscale(c, FleetSize(c))
+}
+
+// isHTTPApp reports whether the healthcheck is an HTTP probe. Workers that
+// only expose an exec probe are not assumed to want traffic-based scaling.
+func isHTTPApp(c *Config) bool {
+	return c.Deploy.Healthcheck.Path != "" && len(c.Deploy.Healthcheck.Command) == 0
 }

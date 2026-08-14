@@ -11,6 +11,26 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- The happy path is `buidl init` then `buidl deploy`. Staging is implied when
+  `-e` is omitted and an environment named `staging` exists (or
+  `defaultEnvironment` is set). Production is never implied. `buidl destroy`
+  always requires `-e`.
+- An HTTP app that omits both `replicas` and `autoscale` gets a
+  HorizontalPodAutoscaler (CPU 70%). Bounds come from the fleet
+  (`infra.servers`), then from Ready schedulable nodes, then a 1–4 fallback.
+  Preview environments stay at one replica. Workers with only an exec
+  healthcheck stay at one replica. Existing configs that set `replicas` stay
+  static.
+- `proxy.ssl` plus `infra.addons.certManagerEmail` turns cert-manager on.
+  `deploy.autoscale` turns metrics-server on unless k3s already bundles it.
+- `buidl deploy` creates accessories that are not in the cluster. It never
+  updates existing ones. `buidl accessory apply` is still the reconcile path.
+- `buidl init` writes `defaultEnvironment: staging`, omits static replica
+  counts, includes a commented `infra` block, and tells you to run
+  `buidl deploy`.
+
 ## [0.1.4] — 2026-08-14
 
 ### Added

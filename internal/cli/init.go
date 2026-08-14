@@ -118,9 +118,8 @@ regenerates these files behind your back.`,
 			a.log.Success("ready")
 			a.log.Info("")
 			a.log.Info("next steps:")
-			a.log.Info("  1. review buidl.yaml (set proxy.host and env)")
-			a.log.Info("  2. buidl config validate")
-			a.log.Info("  3. buidl deploy -e staging")
+			a.log.Info("  1. review buidl.yaml (set proxy.host, infra.servers, and certManagerEmail)")
+			a.log.Info("  2. buidl deploy")
 			return nil
 		},
 	}
@@ -183,6 +182,9 @@ version: %d
 app: %s
 image: %s
 
+# Used when -e is omitted. Production is never implied.
+defaultEnvironment: staging
+
 build:
   # buildkit builds without a Docker daemon and pushes straight to the registry.
   driver: buildkit
@@ -193,7 +195,9 @@ build:
 deploy:
   target: kubernetes
   port: %d
-  replicas: 2
+  # Replica count is omitted on purpose. HTTP apps get a HorizontalPodAutoscaler
+  # sized from the fleet (or the cluster's Ready nodes). Set replicas to pin a
+  # static count, or set autoscale.min / autoscale.max to take over the bounds.
 
   healthcheck:
     # The rollout is gated on this endpoint, so it must return 200 only when the
@@ -219,11 +223,24 @@ env:
 `, config.SchemaVersion, d.Name, image, dockerfilePath(d), d.Port, healthPath(d))
 
 	fmt.Fprintf(&b, `
-# Environments overlay the settings above. Deploy one with: buidl deploy -e staging
+# Uncomment and list the machines buidl should turn into a cluster.
+# buidl never creates VMs — bring them up with OpenTofu, Terraform, or a
+# cloud console, then put their addresses here. buidl deploy installs
+# Kubernetes, joins the nodes, and ships the app.
+#infra:
+#  ssh:
+#    user: root
+#  kubernetes:
+#    distribution: k3s
+#  addons:
+#    certManagerEmail: you@example.com
+#  servers:
+#    - {host: 203.0.113.10}
+
+# Environments overlay the settings above. buidl deploy targets staging by default.
 environments:
   staging:
     deploy:
-      replicas: 1
       kubernetes:
         namespace: %s-staging
         createNamespace: true
@@ -236,15 +253,10 @@ environments:
 
   production:
     deploy:
-      replicas: 3
       kubernetes:
         namespace: %s
       # Fail the deploy and revert if the new release never becomes healthy.
       deployTimeout: 10m
-      autoscale:
-        min: 3
-        max: 10
-        cpuPercent: 70
     proxy:
       host: example.com
       ssl: true

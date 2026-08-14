@@ -1,14 +1,19 @@
 package kubernetes
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/danecwalker/buidl/internal/config"
@@ -670,4 +675,61 @@ func equalPodTemplates(t *testing.T, a, b corev1.PodTemplateSpec) bool {
 func asSlice(v any) []any {
 	out, _ := v.([]any)
 	return out
+}
+
+func TestEnsureMissingAccessoriesNoopWithoutAccessories(t *testing.T) {
+	target, req := testRequest(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	if err := target.EnsureMissingAccessories(context.Background(), req); err != nil {
+		t.Fatalf("no accessories should be a no-op: %v", err)
+	}
+}
+
+func TestAbsentAccessoriesSkipsExisting(t *testing.T) {
+	target, req := accessoryRequest(t, accessoryBase)
+	objs, err := target.RenderAccessories(req)
+	if err != nil {
+		t.Fatalf("RenderAccessories: %v", err)
+	}
+
+	// Seed the cluster with the redis Service only. Everything else is missing.
+	existing := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "web-redis", Namespace: "acme"},
+	}
+	sch := runtime.NewScheme()
+	if err := corev1.AddToScheme(sch); err != nil {
+		t.Fatal(err)
+	}
+	if err := appsv1.AddToScheme(sch); err != nil {
+		t.Fatal(err)
+	}
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{
+		corev1.SchemeGroupVersion,
+		appsv1.SchemeGroupVersion,
+	})
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Secret"), meta.RESTScopeNamespace)
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("Service"), meta.RESTScopeNamespace)
+	mapper.Add(appsv1.SchemeGroupVersion.WithKind("StatefulSet"), meta.RESTScopeNamespace)
+
+	target.dynamic = dynamicfake.NewSimpleDynamicClient(sch, existing)
+	target.mapper = mapper
+
+	missing, err := target.absentObjects(context.Background(), objs)
+	if err != nil {
+		t.Fatalf("absentObjects: %v", err)
+	}
+
+	for _, obj := range missing {
+		if obj.Kind == "Service" && obj.Name == "web-redis" {
+			t.Fatal("existing redis Service must not be treated as missing")
+		}
+	}
+	if findNamed(missing, "StatefulSet", "web-postgres") == nil {
+		t.Error("expected the postgres StatefulSet to be missing")
+	}
+	if findNamed(missing, "Service", "web-postgres") == nil {
+		t.Error("expected the postgres Service to be missing")
+	}
 }
