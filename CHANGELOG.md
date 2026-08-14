@@ -11,6 +11,8 @@ do about them.
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-08-15
+
 ### Changed
 
 - `install.sh` writes the binary to `~/.local/bin` so `buidl update` does
@@ -236,7 +238,8 @@ First tagged release.
   control plane at a time. It does **not** cordon and drain first, so pods are
   restarted rather than gracefully evicted.
 
-[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/danecwalker/buidl/releases/tag/v0.2.3
 [0.2.2]: https://github.com/danecwalker/buidl/releases/tag/v0.2.2
 [0.2.1]: https://github.com/danecwalker/buidl/releases/tag/v0.2.1
 [0.2.0]: https://github.com/danecwalker/buidl/releases/tag/v0.2.0
