@@ -17,10 +17,12 @@ import (
 func newTestApp(t *testing.T, mode ui.Mode) (*App, *bytes.Buffer) {
 	t.Helper()
 	// Clear CI markers so mode resolution and annotation behavior are stable
-	// regardless of where the tests run.
+	// regardless of where the tests run. The background update check is off
+	// so unit tests never wait on GitHub.
 	for _, key := range []string{"CI", "GITHUB_ACTIONS", "GITHUB_OUTPUT", "GITLAB_CI", "BUILDKITE"} {
 		t.Setenv(key, "")
 	}
+	t.Setenv("BUIDL_NO_UPDATE_CHECK", "1")
 
 	buf := &bytes.Buffer{}
 	printer := ui.New(ui.Options{Out: buf, ErrOut: buf, Mode: mode})

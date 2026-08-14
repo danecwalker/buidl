@@ -67,6 +67,12 @@ every generated Dockerfile declares a numeric UID.
 effectively root on the node, and a build runs the least trustworthy code in the
 system.
 
+**Self-update verifies checksums.** `install.sh` and `buidl update` download
+from GitHub Releases and refuse to install unless the SHA-256 matches
+`checksums.txt` from the same release. The background version check is
+informational: it does not download or execute a binary, it is skipped in CI,
+and it is cached for a day. `BUIDL_NO_UPDATE_CHECK=1` turns it off.
+
 ## Supported versions
 
 While the major version is 0, only the latest release receives fixes.

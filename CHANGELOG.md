@@ -11,6 +11,15 @@ do about them.
 
 ## [Unreleased]
 
+### Added
+
+- `buidl update` replaces this binary with the latest GitHub release after
+  verifying `checksums.txt`. Other commands print a notice when a newer
+  release exists and point at `buidl update`. The check is off in CI and
+  when `BUIDL_NO_UPDATE_CHECK=1`.
+- `install.sh` is the one-line installer:
+  `curl -fsSL https://raw.githubusercontent.com/danecwalker/buidl/main/install.sh | bash`
+
 ## [0.1.6] — 2026-08-14
 
 ### Changed

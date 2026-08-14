@@ -13,25 +13,13 @@ That is the happy path. `plan`, `promote`, `rollback`, and `destroy` are there w
 
 ## Install
 
-Binaries for linux and darwin (amd64, arm64) are on the [latest release](https://github.com/danecwalker/buidl/releases/latest). They are static (`CGO_ENABLED=0`) and built with `-trimpath`.
-
 ```sh
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
-arch=$(uname -m)
-case "$arch" in
-  x86_64) arch=amd64 ;;
-  aarch64|arm64) arch=arm64 ;;
-esac
-
-curl -fsSL -o buidl \
-  "https://github.com/danecwalker/buidl/releases/latest/download/buidl-${os}-${arch}"
-curl -fsSL -O https://github.com/danecwalker/buidl/releases/latest/download/checksums.txt
-sha256sum --ignore-missing -c checksums.txt   # shasum -a 256 -c on macOS
-chmod +x buidl
-sudo mv buidl /usr/local/bin/buidl
+curl -fsSL https://raw.githubusercontent.com/danecwalker/buidl/main/install.sh | bash
 ```
 
-`checksums.txt` lists bare filenames, so verification works when the binary sits next to it. `--ignore-missing` lets you check one platform against a file that lists all four.
+That detects the platform, shows download progress, and verifies the SHA-256 against `checksums.txt` from the same GitHub release. The binary lands in `/usr/local/bin` when you can write there, otherwise `~/.local/bin`. Later upgrades are `buidl update`.
+
+linux and darwin, amd64 and arm64. The binaries are static (`CGO_ENABLED=0`) and built with `-trimpath`.
 
 With Go 1.25+:
 
@@ -39,7 +27,7 @@ With Go 1.25+:
 go install github.com/danecwalker/buidl/cmd/buidl@latest
 ```
 
-`go install` does not stamp the version, so the binary reports `dev`. Use the release binary or `make install` if you need `buidl --version` to match a tag.
+`go install` does not stamp the version, so the binary reports `dev`. Use the installer or `make install` if you need `buidl --version` to match a tag. `buidl update` will replace a `dev` binary with the latest release.
 
 From source:
 

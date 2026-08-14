@@ -80,6 +80,10 @@ type Printer struct {
 	// spin animates long steps on an interactive terminal.
 	spin spinner
 
+	// progressBucket and progressAt throttle Progress in non-TTY output.
+	progressBucket int
+	progressAt     time.Time
+
 	// failed records whether any error was emitted, so the process can exit
 	// non-zero even when an error was recovered and reported.
 	failed bool
@@ -125,12 +129,13 @@ func New(opts Options) *Printer {
 	color := mode == ModePretty && !opts.NoColor && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 
 	return &Printer{
-		out:     out,
-		errOut:  errOut,
-		mode:    mode,
-		color:   color,
-		verbose: opts.Verbose,
-		ci:      ci,
+		out:            out,
+		errOut:         errOut,
+		mode:           mode,
+		color:          color,
+		verbose:        opts.Verbose,
+		ci:             ci,
+		progressBucket: -1,
 	}
 }
 
