@@ -92,6 +92,32 @@ func (a *App) clusterPlan(ctx context.Context) (*cluster.Manager, *cluster.Plan,
 	return mgr, plan, nil
 }
 
+// adoptManagedContext points the loaded config at the managed cluster and
+// fetches kubeconfig if this machine does not already have it.
+//
+// mgr is the manager the caller already opened (plan and deploy inspect the
+// fleet first). Reusing it avoids a second SSH session just to copy
+// credentials. Pass nil only when the context is already local.
+func (a *App) adoptManagedContext(cmd *cobra.Command, mgr *cluster.Manager) error {
+	if a.cfg == nil || a.cfg.Infra == nil || a.cfg.Deploy.Kubernetes.Context != "" {
+		return nil
+	}
+
+	contextName := a.defaultContextName()
+	if !cluster.ContextExists(contextName) {
+		if mgr == nil {
+			return fmt.Errorf("no local credentials for the %s cluster (kubeconfig context %q not found)",
+				a.cfg.Environment, contextName)
+		}
+		a.log.Detail("no local credentials for %s; fetching", contextName)
+		if err := a.fetchKubeconfig(cmd, mgr, contextName, "", false); err != nil {
+			return fmt.Errorf("cannot obtain credentials for the %s cluster: %w", a.cfg.Environment, err)
+		}
+	}
+	a.cfg.Deploy.Kubernetes.Context = contextName
+	return nil
+}
+
 // ensureClusterCredentials makes sure this machine can address the managed
 // cluster for the currently loaded environment.
 //
@@ -102,14 +128,11 @@ func (a *App) clusterPlan(ctx context.Context) (*cluster.Manager, *cluster.Plan,
 // a different cluster entirely. Reading the wrong cluster's state is worse than
 // failing, because the answer looks plausible.
 func (a *App) ensureClusterCredentials(cmd *cobra.Command) error {
-	if a.cfg.Infra == nil || a.cfg.Deploy.Kubernetes.Context != "" {
+	if a.cfg == nil || a.cfg.Infra == nil || a.cfg.Deploy.Kubernetes.Context != "" {
 		return nil
 	}
-
-	contextName := a.defaultContextName()
-	if cluster.ContextExists(contextName) {
-		a.cfg.Deploy.Kubernetes.Context = contextName
-		return nil
+	if cluster.ContextExists(a.defaultContextName()) {
+		return a.adoptManagedContext(cmd, nil)
 	}
 
 	mgr, err := cluster.New(a.cfg.Infra, a.log)
@@ -117,13 +140,7 @@ func (a *App) ensureClusterCredentials(cmd *cobra.Command) error {
 		return err
 	}
 	defer mgr.Close()
-
-	a.log.Detail("no local credentials for %s; fetching", contextName)
-	if err := a.fetchKubeconfig(cmd, mgr, contextName, "", false); err != nil {
-		return fmt.Errorf("cannot obtain credentials for the %s cluster: %w", a.cfg.Environment, err)
-	}
-	a.cfg.Deploy.Kubernetes.Context = contextName
-	return nil
+	return a.adoptManagedContext(cmd, mgr)
 }
 
 // errClusterUnknown is returned when no server could be inspected.

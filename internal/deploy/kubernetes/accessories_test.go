@@ -406,8 +406,8 @@ func TestAccessoryMissingSecretFailsLoudly(t *testing.T) {
 
 	_, err := target.RenderAccessories(req)
 	if err == nil {
-		// Preflight only covers the app's secrets, so silence here would mean a
-		// Postgres that boots without a password and fails opaquely.
+		// Silence here would mean a Postgres that boots without a password
+		// and fails opaquely in container logs.
 		t.Fatal("expected an error when an accessory secret is unset")
 	}
 	if !strings.Contains(err.Error(), "POSTGRES_PASSWORD") {

@@ -151,7 +151,9 @@ func TestAccessoryRequestRejectsEmptyConfig(t *testing.T) {
 	t.Setenv("KUBECONFIG", "/nonexistent/kubeconfig")
 	t.Setenv("HOME", t.TempDir())
 
-	_, _, err := app.accessoryRequest(t.Context())
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	_, _, err := app.accessoryRequest(cmd)
 	if err == nil {
 		t.Fatal("expected an error for a config with no accessories")
 	}

@@ -24,14 +24,15 @@ func (a *App) secretOptions() secrets.Options {
 	return secrets.Options{
 		Root:        a.root,
 		Environment: a.cfg.Environment,
-		Names:       a.cfg.Env.Secret,
+		Names:       a.cfg.SecretNames(),
 		Dotenv:      a.cfg.Env.Dotenv,
 		DotenvFiles: a.cfg.Env.DotenvFiles,
 	}
 }
 
-// resolveSecrets loads declared secret values and fails with a clear list when
-// any are missing.
+// resolveSecrets loads declared secret values — the app's env.secret plus
+// each accessory's env.secret — and fails with a clear list when any are
+// missing.
 func (a *App) resolveSecrets() (map[string]string, error) {
 	res, err := secrets.Resolve(a.secretOptions())
 	if err != nil {

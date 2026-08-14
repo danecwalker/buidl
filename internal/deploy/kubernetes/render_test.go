@@ -409,6 +409,40 @@ env:
 	}
 }
 
+func TestAppSecretOmitsAccessoryOnlyNames(t *testing.T) {
+	target, req := testRequest(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  kubernetes: {namespace: acme}
+env:
+  secret: [DATABASE_URL]
+accessories:
+  postgres:
+    type: postgres
+`)
+	req.Secrets = map[string]string{
+		"DATABASE_URL":      "postgres://web@web-postgres/web",
+		"POSTGRES_PASSWORD": "hunter2-do-not-leak",
+	}
+
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	obj := findObject(objs, "Secret")
+	if obj == nil {
+		t.Fatal("expected the app Secret")
+	}
+	sec := obj.Object.(*corev1.Secret)
+	if _, ok := sec.Data["POSTGRES_PASSWORD"]; ok {
+		t.Error("accessory-only POSTGRES_PASSWORD must not land in the app Secret")
+	}
+	if _, ok := sec.Data["DATABASE_URL"]; !ok {
+		t.Error("app DATABASE_URL missing from the app Secret")
+	}
+}
+
 func TestEnvIsDeterministicAndOverridable(t *testing.T) {
 	target, req := testRequest(t, `
 app: web

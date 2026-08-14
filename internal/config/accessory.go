@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -86,6 +87,41 @@ func applyAccessoryDefaults(app, name string, acc Accessory) Accessory {
 // release.ObjectName(app, name) for names that fit the Kubernetes limit.
 func AccessoryServiceName(app, name string) string {
 	return app + "-" + name
+}
+
+// SecretNames returns every secret a deploy must resolve: the app's
+// env.secret plus each accessory's env.secret.
+//
+// Accessory-only names (POSTGRES_PASSWORD on type: postgres) live in the
+// accessory's Secret. They are not injected into the app unless the user
+// also listed them under env.secret.
+func (c *Config) SecretNames() []string {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(c.Env.Secret)+len(c.Accessories))
+	var out []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, name := range c.Env.Secret {
+		add(name)
+	}
+	accNames := make([]string, 0, len(c.Accessories))
+	for name := range c.Accessories {
+		accNames = append(accNames, name)
+	}
+	sort.Strings(accNames)
+	for _, name := range accNames {
+		for _, secret := range c.Accessories[name].Env.Secret {
+			add(secret)
+		}
+	}
+	return out
 }
 
 // SynthesizeAccessoryURLs derives connection URLs from typed accessories
