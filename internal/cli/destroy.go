@@ -22,9 +22,14 @@ func newDestroyCmd(a *App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "destroy",
-		Short: "Tear down an environment",
-		Long: `Remove a deployed environment from the cluster.
+		Use:          "destroy",
+		SilenceUsage: true,
+		Short:        "Tear down an environment",
+		Long: `Remove a deployed app from the cluster.
+
+A file with no environment overlays has one target: ` + "`buidl destroy`" + `
+is enough. When overlays are declared, ` + "`-e`" + ` is required so this
+cannot tear down the wrong one.
 
 Preview environments live in a namespace of their own. destroy deletes that
 namespace, which is how a pull request's app goes away when the PR closes.
@@ -33,6 +38,7 @@ Staging and production keep their namespace and any accessories. Only the
 app objects (Deployment, Service, Ingress, and so on) are removed.
 
 Examples:
+  buidl destroy --yes
   buidl destroy -e preview --yes
   buidl destroy -e preview --dry-run
   buidl destroy -e preview --stale 7d --yes`,
@@ -45,9 +51,10 @@ Examples:
 			if err := a.requireConfig(ctx); err != nil {
 				return err
 			}
-			// Staging is implied for deploy and status. destroy must not inherit
-			// that: tearing down the wrong environment is worse than asking.
-			if a.opts.environment == "" {
+			// When overlays exist, destroy must not inherit defaultEnvironment:
+			// tearing down the wrong one is worse than asking. A file with no
+			// environments has a single target, so -e would be ceremony.
+			if a.opts.environment == "" && len(a.environments) > 0 {
 				return fmt.Errorf("`destroy` requires -e/--env so it cannot target the wrong environment")
 			}
 

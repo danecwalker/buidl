@@ -3,7 +3,7 @@
 // The command names deliberately echo tools users already know: `deploy`,
 // `rollback`, `logs` and `status` behave the way Kamal's equivalents do, while
 // `plan`, `promote` and `releases` bring the immutable-release model that makes
-// staging-to-production promotion exact rather than approximate.
+// promotion between opt-in environments exact rather than approximate.
 package cli
 
 import (
@@ -82,14 +82,14 @@ immutable, digest-pinned releases.
 Every deploy is a release you can inspect, promote, and roll back:
 
   buidl init                        detect the project and write buidl.yaml
-  buidl add --database postgres     add a Postgres accessory to the stack
-  buidl environment list            list staging, production, preview, ...
-  buidl deploy                      build, push, and roll out (staging by default)
-  buidl plan -e production          show exactly what would change
-  buidl promote --from staging --to production
-                                    deploy staging's exact image to production
-  buidl rollback -e production      revert to the previous release
-  buidl destroy -e preview          tear down a preview environment
+  buidl add server 203.0.113.10     add a machine to the fleet
+  buidl add domain example.com      add a hostname (again for api.example.com)
+  buidl add postgres                add a Postgres accessory
+  buidl deploy                      build, push, and roll out
+  buidl environment new staging     opt in to a named overlay
+  buidl plan                        show exactly what would change
+  buidl rollback                    revert to the previous release
+  buidl destroy                     tear down the app (requires -e when overlays exist)
   buidl variable list               inspect release variables (never prints secrets)
   buidl update                      install the latest buidl release`,
 		SilenceUsage:  true,

@@ -11,6 +11,32 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- The default product is one live app. `buidl init` no longer writes
+  `defaultEnvironment: staging` or staging / production / preview overlays.
+  `buidl deploy` with no `-e` targets that single app. Existing files that
+  declare `environments` keep working, including implied staging.
+- `buidl init` no longer writes a GitHub Actions workflow. Pass `--ci` for a
+  single job that deploys on push to `main`. `--no-ci` is now a no-op alias.
+- Omitted `deploy.strategy.type` defaults to `bluegreen`. Files that set
+  `type: rolling` are unchanged. Init-generated files from ≤0.2.3 set rolling
+  explicitly, so they do not flip.
+- `buidl add` is noun-first: `add server`, `add domain`, `add postgres`,
+  `add redis`, `add app`. `--database` and `--service` remain as hidden aliases.
+- The first `buidl environment new` sets `defaultEnvironment` to that name
+  (not only when the name is staging).
+- `buidl destroy` requires `-e` only when overlays are declared. A
+  single-target file can destroy without `-e` (still `--yes` in CI).
+
+### Added
+
+- `buidl add server HOST` writes `infra.servers` (and k3s / SSH defaults).
+  It does not create a VM. `--email` sets `certManagerEmail`.
+- `buidl add domain HOST` writes `proxy.host` and `proxy.ssl`. A second
+  domain (`api.example.com`, `www`, …) is appended to `proxy.hosts` on the
+  same app: one Ingress, one certificate.
+
 ## [0.2.3] — 2026-08-15
 
 ### Changed

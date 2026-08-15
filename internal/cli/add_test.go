@@ -34,11 +34,11 @@ func TestAddDatabasePostgres(t *testing.T) {
 	if !strings.Contains(s, "type: postgres") {
 		t.Errorf("typed accessory missing:\n%s", s)
 	}
-	if !strings.Contains(s, "Used when -e is omitted") {
+	if !strings.Contains(s, "buidl configuration") {
 		t.Errorf("init comments were stripped:\n%s", s)
 	}
 
-	res, err := config.Load(config.LoadOptions{Path: path, Environment: "staging", Strict: true})
+	res, err := config.Load(config.LoadOptions{Path: path, Strict: true})
 	if err != nil {
 		t.Fatalf("typed postgres must load: %v", err)
 	}
@@ -81,6 +81,33 @@ func TestAddDatabasePostgres(t *testing.T) {
 	}
 }
 
+func TestAddPostgresSubcommand(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newAddCmd(app)
+	cmd.SetArgs([]string{"postgres", "--disk", "20Gi"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := config.Load(config.LoadOptions{Path: path, Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acc := res.Config.Accessories["postgres"]
+	if acc.Type != "postgres" {
+		t.Errorf("type = %q", acc.Type)
+	}
+	if acc.Storage != "20Gi" {
+		t.Errorf("storage = %q", acc.Storage)
+	}
+}
+
 func TestAddDatabaseRedis(t *testing.T) {
 	path := writeTempConfig(t, `
 app: web
@@ -90,7 +117,7 @@ image: ghcr.io/acme/web
 	app.opts.configPath = path
 
 	cmd := newAddCmd(app)
-	cmd.SetArgs([]string{"--database", "redis", "--disk", "2Gi"})
+	cmd.SetArgs([]string{"redis", "--disk", "2Gi"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +135,7 @@ image: ghcr.io/acme/web
 	}
 }
 
-func TestAddServiceSecondNameRejected(t *testing.T) {
+func TestAddAppSecondNameRejected(t *testing.T) {
 	path := writeTempConfig(t, `
 app: web
 image: ghcr.io/acme/web
@@ -117,17 +144,61 @@ image: ghcr.io/acme/web
 	app.opts.configPath = path
 
 	cmd := newAddCmd(app)
-	cmd.SetArgs([]string{"--service", "--name", "api"})
+	cmd.SetArgs([]string{"app", "api"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected a second named service to fail")
+		t.Fatal("expected a second named app to fail")
 	}
 	if !strings.Contains(err.Error(), "not supported yet") {
 		t.Errorf("error should say this is not supported, got: %v", err)
 	}
 }
 
-func TestAddServiceUpdatesHost(t *testing.T) {
+func TestAddDomainPrimaryAndAlias(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	app, out := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newAddCmd(app)
+	cmd.SetArgs([]string{"domain", "example.com"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = newAddCmd(app)
+	cmd.SetArgs([]string{"domain", "api.example.com"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := config.Load(config.LoadOptions{Path: path, Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.Proxy.Host != "example.com" {
+		t.Errorf("host = %q", res.Config.Proxy.Host)
+	}
+	if len(res.Config.Proxy.Hosts) != 1 || res.Config.Proxy.Hosts[0] != "api.example.com" {
+		t.Errorf("hosts = %v, want [api.example.com]", res.Config.Proxy.Hosts)
+	}
+	if !res.Config.Proxy.SSL {
+		t.Error("ssl should be on")
+	}
+	if !strings.Contains(out.String(), "alias") {
+		t.Errorf("second domain should be reported as an alias:\n%s", out)
+	}
+
+	cmd = newAddCmd(app)
+	cmd.SetArgs([]string{"domain", "api.example.com"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("duplicate domain must fail")
+	}
+}
+
+func TestAddDomainWritesOverlayWhenDefaultEnvExists(t *testing.T) {
 	path := writeTempConfig(t, `
 app: web
 image: ghcr.io/acme/web
@@ -141,12 +212,122 @@ environments:
 	app.opts.configPath = path
 
 	cmd := newAddCmd(app)
-	cmd.SetArgs([]string{"--service", "--host", "web.example.com", "--path", "/healthz"})
+	cmd.SetArgs([]string{"domain", "api.staging.example.com"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
 
 	res, err := config.Load(config.LoadOptions{Path: path, Environment: "staging", Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.Proxy.Host != "staging.example.com" {
+		t.Errorf("primary host = %q", res.Config.Proxy.Host)
+	}
+	if len(res.Config.Proxy.Hosts) != 1 || res.Config.Proxy.Hosts[0] != "api.staging.example.com" {
+		t.Errorf("hosts = %v", res.Config.Proxy.Hosts)
+	}
+}
+
+func TestAddServerWritesInfra(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	app, out := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newAddCmd(app)
+	cmd.SetArgs([]string{"server", "203.0.113.10", "--email", "you@example.com"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, "203.0.113.10") {
+		t.Errorf("server missing:\n%s", s)
+	}
+	if !strings.Contains(s, "you@example.com") {
+		t.Errorf("email missing:\n%s", s)
+	}
+	if !strings.Contains(s, "distribution: k3s") {
+		t.Errorf("distribution missing:\n%s", s)
+	}
+
+	res, err := config.Load(config.LoadOptions{Path: path, Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.Infra == nil || len(res.Config.Infra.Servers) != 1 {
+		t.Fatalf("servers = %v", res.Config.Infra)
+	}
+	if res.Config.Infra.Servers[0].Host != "203.0.113.10" {
+		t.Errorf("host = %q", res.Config.Infra.Servers[0].Host)
+	}
+	if res.Config.Infra.Addons.CertManagerEmail != "you@example.com" {
+		t.Errorf("email = %q", res.Config.Infra.Addons.CertManagerEmail)
+	}
+	if !strings.Contains(out.String(), "ssh-keyscan") {
+		t.Errorf("expected known_hosts hint:\n%s", out)
+	}
+
+	cmd = newAddCmd(app)
+	cmd.SetArgs([]string{"server", "203.0.113.10"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("duplicate server must fail")
+	}
+}
+
+func TestAddServerAfterDomainRequiresEmail(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newAddCmd(app)
+	cmd.SetArgs([]string{"domain", "example.com"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = newAddCmd(app)
+	cmd.SetArgs([]string{"server", "203.0.113.10"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("server after domain without --email must fail")
+	}
+	if !strings.Contains(err.Error(), "--email") {
+		t.Errorf("error should mention --email, got: %v", err)
+	}
+
+	cmd = newAddCmd(app)
+	cmd.SetArgs([]string{"server", "203.0.113.10", "--email", "ops@example.com"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAddHiddenServiceFlagStillWorks(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newAddCmd(app)
+	cmd.SetArgs([]string{"--service", "--host", "web.example.com", "--path", "/healthz"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := config.Load(config.LoadOptions{Path: path, Strict: true})
 	if err != nil {
 		t.Fatal(err)
 	}

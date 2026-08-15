@@ -3,13 +3,15 @@
 Build container images without a Docker daemon and deploy them to Kubernetes as immutable, digest-pinned releases.
 
 ```
-buidl init
+buidl init --registry ghcr.io/myorg
+buidl add server 203.0.113.10 --email you@example.com
+buidl add domain example.com
 buidl deploy
 ```
 
-That is the happy path. `plan`, `promote`, `rollback`, and `destroy` are there when you need them. Staging is implied when `-e` is omitted; production is never implied. `destroy` always requires `-e`.
+That is the happy path. One live app, blue-green updates, no staging/production split unless you opt in. `plan`, `rollback`, and `destroy` are there when you need them. Named environments are `buidl environment new`. `destroy` requires `-e` only when overlays exist.
 
-`plan` and `deploy` can also install k3s or RKE2 on machines you already have. Creating those machines is not buidl's job. Use OpenTofu, Terraform, Ansible, or a cloud console, then list the hosts in `buidl.yaml`.
+`plan` and `deploy` can also install k3s or RKE2 on machines you already have. Creating those machines is not buidl's job. Use OpenTofu, Terraform, Ansible, or a cloud console, then `buidl add server`.
 
 ## Install
 
@@ -47,12 +49,16 @@ Needs a kubeconfig and a BuildKit endpoint (see [Requirements](#requirements)).
 ```sh
 cd my-app
 buidl init --registry ghcr.io/myorg
-# set proxy.host, infra.servers, and certManagerEmail if you need them
-buidl add --database postgres   # optional
+buidl add server 203.0.113.10 --email you@example.com
+buidl add domain example.com
+buidl add domain api.example.com   # same app, extra hostname
+buidl add postgres                 # optional
 buidl deploy
 ```
 
-`init` detects Go, Node, Python, Ruby, Rust, and static sites. If there is no Dockerfile it writes a multi-stage one. It also scaffolds `.buidl/` (secrets + hooks) and a GitHub Actions workflow.
+`init` detects Go, Node, Python, Ruby, Rust, and static sites. If there is no Dockerfile it writes a multi-stage one. It also scaffolds `.buidl/` (secrets + hooks). Pass `--ci` to write a GitHub Actions workflow that deploys on push to main.
+
+A second `add domain` is an alias on this app (`www`, `api.example.com`, …): one Ingress, one certificate. A separate API process is a second app (not in one file yet) — `buidl init` in another directory for now.
 
 ## How a release works
 
@@ -72,7 +78,7 @@ app: web
 image: ghcr.io/acme/web
 ```
 
-That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, `/livez` `/readyz` `/startupz` probes, a rolling update with `maxUnavailable: 0`, a non-root pod with all capabilities dropped, a namespace named after the app, and an imagePullSecret copied from your local Docker login so the cluster can pull the image you just pushed. Set `replicas` to pin a static count. Preview environments stay at one replica.
+That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, `/livez` `/readyz` `/startupz` probes, a blue-green update, a non-root pod with all capabilities dropped, a namespace named after the app, and an imagePullSecret copied from your local Docker login so the cluster can pull the image you just pushed. Set `replicas` to pin a static count. Set `deploy.strategy.type: rolling` to keep a rolling update. Preview environments stay at one replica.
 
 A more complete file:
 
@@ -99,8 +105,7 @@ deploy:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {memory: 512Mi}
   strategy:
-    type: rolling           # rolling | bluegreen | recreate
-    maxUnavailable: "0"
+    type: bluegreen         # bluegreen | rolling | recreate
   drainTimeout: 30s
   deployTimeout: 5m
 
@@ -111,8 +116,10 @@ env:
 
 proxy:
   host: acme.com
+  hosts: [api.acme.com]     # extra names on the same app
   ssl: true                 # cert-manager issues the certificate
 
+# Opt in with `buidl environment new`. Init does not write these.
 environments:
   staging:
     proxy: {host: staging.acme.com}
@@ -131,13 +138,16 @@ environments:
       host: ${BUIDL_SLUG}.preview.acme.com
 ```
 
-Environments deep-merge onto the base. Maps merge key by key. Sequences are replaced, so `platforms: [linux/arm64]` in an overlay means exactly that list.
+Most apps never need the `environments` block. Add one when you want a second target (GitHub Actions staging, a preview per PR):
 
 ```sh
 buidl environment list
-buidl environment new qa --host qa.example.com
+buidl environment new staging --host staging.example.com
+buidl environment new production --host example.com
 buidl environment set staging
 ```
+
+The first overlay you create becomes `defaultEnvironment`. Production is never implied from an empty `-e` when several overlays exist and no default is set. Environments deep-merge onto the base. Maps merge key by key. Sequences are replaced, so `platforms: [linux/arm64]` in an overlay means exactly that list.
 
 `environment` (alias `env`) edits the overlays. It does not create or destroy cluster objects.
 
@@ -160,9 +170,9 @@ buidl sets:
 
 `BUIDL_SLUG` is how preview environments get a hostname and namespace without extra config.
 
-A preview environment is disposable. `buidl destroy -e preview` deletes its namespace. The generated GitHub workflow does that when the pull request closes (merge or not). Staging is a separate deploy from `main`; the preview objects are never moved into staging.
+A preview environment is disposable. `buidl destroy -e preview` deletes its namespace. Long-lived environments keep their namespace and any accessories; only the app objects are removed, and production also requires `--force`.
 
-`destroy --stale 7d` is the backstop for a missed close event: it deletes preview namespaces older than the duration. Long-lived environments (staging, production) keep their namespace and any accessories; only the app objects are removed, and production also requires `--force`.
+`destroy --stale 7d` is the backstop for a missed close event: it deletes preview namespaces older than the duration. On a single-target file (no overlays), `buidl destroy` does not need `-e`.
 
 ### Health checks
 
@@ -248,8 +258,8 @@ Push credentials come from the standard Docker config (`docker login`, `gcloud a
 Databases, caches, and queues sit next to the app in the same file. The usual way to add one is a command, not an edit:
 
 ```sh
-buidl add --database postgres
-buidl add --database redis
+buidl add postgres
+buidl add redis
 ```
 
 That writes `type: postgres` (or `redis`) and generates `POSTGRES_PASSWORD` plus `DATABASE_URL` into `.buidl/secrets`. Image, port, volume and mount path are filled at load. A password already in `.buidl/secrets` is enough — you do not have to list `POSTGRES_PASSWORD` under the app's `env.secret`. A first `buidl deploy` creates any accessory that is not already in the cluster. Later deploys leave existing accessories alone — including ones that have drifted — so shipping a web change cannot restart a database.
@@ -436,21 +446,24 @@ Unchanged objects are listed too. `--detailed` adds the full YAML diff. Secret c
 
 | Command | Purpose |
 |---|---|
-| `init` | detect the project, write `buidl.yaml`, Dockerfile, CI |
+| `init` | detect the project, write `buidl.yaml` and Dockerfile (`--ci` for a workflow) |
+| `add server` | list a machine you already have |
+| `add domain` | primary hostname; run again for `api.example.com` / `www` |
+| `add postgres` / `add redis` | typed accessory |
+| `add app` | configure this app's host, health path, or image |
 | `build` | build and push an image, print the digest |
 | `deploy` | converge the cluster if needed, then build, push, apply, wait |
 | `plan` | dry-run the cluster and the app |
 | `promote` | deploy one environment's exact digest to another |
 | `rollback` | previous release, or `--to <id>` |
-| `destroy` | tear down an environment (preview namespace, or app objects) |
+| `destroy` | tear down the app (`-e` required when overlays exist) |
 | `status` | live release, health, instances |
 | `releases` | history from cluster revisions |
 | `logs` | stream logs (`-F` to follow) |
 | `manifest` | print the YAML buidl would apply |
 | `config show` / `validate` / `environments` | inspect resolved config |
-| `environment` / `env` `list` `new` `set` `delete` | manage environment overlays |
+| `environment` / `env` `list` `new` `set` `delete` | opt-in environment overlays |
 | `variable` / `var` `list` `set` `delete` | inspect and set release variables |
-| `add --database` / `--service` | write a database or this app's host into the file |
 | `hooks` | which lifecycle hooks are enabled |
 | `accessory plan` / `apply` | reconcile databases and caches |
 | `cluster ...` | inspect or tear down a buidl-managed cluster |
@@ -467,12 +480,7 @@ Exit codes: `0` success, `1` failure, `2` changes detected (`plan --detailed-exi
 
 Output is plain in CI, colored on a terminal, or newline-delimited JSON with `-o json`. Warnings and errors become CI annotations. A dirty working tree warns locally and fails in CI.
 
-`buidl init` writes a workflow in this shape:
-
-- Pull request: preview environment plus a production `plan`
-- Pull request closed: `buidl destroy -e preview` deletes the preview namespace
-- Merge to main: deploy staging
-- Manual dispatch: `promote` staging's digest to production, gated on a GitHub environment
+`buidl init --ci` writes a workflow that deploys the app on every push to `main`. Preview, staging, and production jobs are not generated: add those overlays with `buidl environment new` and write the workflow when you want them.
 
 ## Requirements
 

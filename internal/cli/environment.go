@@ -14,14 +14,19 @@ import (
 func newEnvironmentCmd(a *App) *cobra.Command {
 	list := newEnvironmentListCmd(a)
 	cmd := &cobra.Command{
-		Use:     "environment",
-		Aliases: []string{"env", "environments"},
-		Short:   "Manage deployment environments",
+		Use:          "environment",
+		Aliases:      []string{"env", "environments"},
+		SilenceUsage: true,
+		Short:        "Manage deployment environments",
 		Long: `Create, list, and remove environment overlays in buidl.yaml.
 
-An environment is a named overlay: staging, production, preview, or one you
-add. ` + "`buidl deploy`" + ` targets staging by default (or defaultEnvironment).
-Production is never implied.
+An environment is an opt-in overlay. ` + "`buidl init`" + ` writes none; a
+single-target app deploys with no ` + "`-e`" + `. Add staging, production, or
+preview when you actually want more than one target.
+
+The first environment you create becomes defaultEnvironment. Production is
+never implied from an empty ` + "`-e`" + ` when several overlays exist and no
+default is set.
 
   buidl environment list
   buidl environment new qa
@@ -128,7 +133,7 @@ when that name is not already declared.
 			if err := f.Set([]string{"environments", name}, overlay); err != nil {
 				return err
 			}
-			if f.DefaultEnvironment() == "" && strings.EqualFold(name, "staging") {
+			if f.DefaultEnvironment() == "" {
 				if err := f.SetString([]string{"defaultEnvironment"}, name); err != nil {
 					return err
 				}

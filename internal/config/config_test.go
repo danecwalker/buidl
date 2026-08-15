@@ -72,6 +72,9 @@ func TestLoadMinimalAppliesDefaults(t *testing.T) {
 		t.Errorf("CacheRef = %q", cfg.Build.CacheRef)
 	}
 	// Zero-downtime by default is the core promise; assert it explicitly.
+	if cfg.Deploy.Strategy.Type != StrategyBlueGreen {
+		t.Errorf("Strategy.Type = %q, want bluegreen", cfg.Deploy.Strategy.Type)
+	}
 	if cfg.Deploy.Strategy.MaxUnavailable != "0" {
 		t.Errorf("MaxUnavailable = %q, want 0 for zero-downtime", cfg.Deploy.Strategy.MaxUnavailable)
 	}
@@ -97,6 +100,22 @@ func TestLoadMinimalAppliesDefaults(t *testing.T) {
 	}
 	if cfg.Deploy.Resources.Requests["cpu"] != DefaultRequestCPU {
 		t.Errorf("cpu request = %q, want %s (HPA needs a request)", cfg.Deploy.Resources.Requests["cpu"], DefaultRequestCPU)
+	}
+}
+
+func TestExplicitRollingStrategyIsPreserved(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  strategy:
+    type: rolling
+`), Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.Deploy.Strategy.Type != StrategyRolling {
+		t.Errorf("Strategy.Type = %q, want rolling", res.Config.Deploy.Strategy.Type)
 	}
 }
 
@@ -554,7 +573,7 @@ func TestValidation(t *testing.T) {
 		},
 		{
 			name:    "stalled rolling update",
-			yaml:    "app: web\nimage: ghcr.io/acme/web\ndeploy: {strategy: {maxSurge: \"0\", maxUnavailable: \"0\"}}\n",
+			yaml:    "app: web\nimage: ghcr.io/acme/web\ndeploy: {strategy: {type: rolling, maxSurge: \"0\", maxUnavailable: \"0\"}}\n",
 			wantErr: "can never make progress",
 		},
 		{

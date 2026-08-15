@@ -19,7 +19,7 @@ const (
 	DefaultRedisStorage    = "1Gi"
 )
 
-// NormalizeAccessoryType maps aliases onto the types `add --database` writes.
+// NormalizeAccessoryType maps aliases onto the types `add postgres` writes.
 func NormalizeAccessoryType(t string) string {
 	switch strings.ToLower(strings.TrimSpace(t)) {
 	case "postgres", "postgresql", "pg":

@@ -28,19 +28,23 @@ func TestGithubWorkflowIsValidYAML(t *testing.T) {
 	if doc.Name == "" {
 		t.Error("workflow has no name")
 	}
-	// The four-stage shape is the point of the template.
+	if _, ok := doc.Jobs["deploy"]; !ok {
+		t.Error("workflow is missing the deploy job")
+	}
 	for _, job := range []string{"preview", "teardown", "staging", "production"} {
-		if _, ok := doc.Jobs[job]; !ok {
-			t.Errorf("workflow is missing the %q job", job)
+		if _, ok := doc.Jobs[job]; ok {
+			t.Errorf("single-target workflow should not include a %q job", job)
 		}
 	}
 	if len(doc.On) == 0 {
 		t.Error("workflow has no triggers")
 	}
 
-	// Production must be a promotion, never a rebuild.
-	if !strings.Contains(githubWorkflow, "buidl promote --from staging --to production") {
-		t.Error("the production job should promote rather than rebuild")
+	if !strings.Contains(githubWorkflow, "buidl deploy --auto-rollback") {
+		t.Error("the deploy job should run buidl deploy with no -e")
+	}
+	if strings.Contains(githubWorkflow, "buidl promote") {
+		t.Error("the default workflow should not promote; environments are opt-in")
 	}
 	// The download URL must hit the published repo. github.com/danewalker/buidl 404s.
 	if !strings.Contains(githubWorkflow, "https://github.com/danecwalker/buidl/releases/latest/download/buidl-linux-amd64") {
@@ -55,14 +59,8 @@ func TestGithubWorkflowIsValidYAML(t *testing.T) {
 	}
 	// Closing a PR must tear the preview down; the default pull_request types
 	// omit `closed`, so the workflow has to list it.
-	if !strings.Contains(githubWorkflow, "buidl destroy -e preview --yes") {
-		t.Error("the teardown job should destroy the preview environment")
-	}
-	if !strings.Contains(githubWorkflow, "closed") {
-		t.Error("the workflow must listen for pull_request closed so previews do not leak")
-	}
-	if !strings.Contains(githubWorkflow, "github.event.action != 'closed'") {
-		t.Error("the preview job must not run when the PR is closed")
+	if strings.Contains(githubWorkflow, "buidl destroy -e preview") {
+		t.Error("the default workflow should not destroy a preview environment")
 	}
 }
 
@@ -84,104 +82,79 @@ func TestRenderedConfigIsValid(t *testing.T) {
 			rendered := renderConfig(det, "ghcr.io/acme/"+det.Name)
 			path := writeTempConfig(t, rendered)
 
-			// Every environment the template declares must load and validate.
-			for _, env := range []string{"staging", "production", "preview"} {
-				res, err := config.Load(config.LoadOptions{
-					Path:        path,
-					Environment: env,
-					Strict:      true,
-					Vars:        map[string]string{"BUIDL_SLUG": "example-branch"},
-				})
-				if err != nil {
-					t.Fatalf("environment %q did not validate:\n%v\n\nrendered config:\n%s", env, err, rendered)
-				}
-
-				cfg := res.Config
-				if cfg.App != det.Name {
-					t.Errorf("App = %q, want %q", cfg.App, det.Name)
-				}
-				if cfg.Deploy.Port != det.Port {
-					t.Errorf("Port = %d, want %d", cfg.Deploy.Port, det.Port)
-				}
-				if det.HealthPath != "" {
-					if cfg.Deploy.Healthcheck.Path != det.HealthPath {
-						t.Errorf("healthcheck path = %q, want %q", cfg.Deploy.Healthcheck.Path, det.HealthPath)
-					}
-					if cfg.Deploy.Healthcheck.Readiness != det.HealthPath {
-						t.Errorf("readiness = %q, want the explicit path %q", cfg.Deploy.Healthcheck.Readiness, det.HealthPath)
-					}
-				} else {
-					if cfg.Deploy.Healthcheck.Path != "" {
-						t.Errorf("healthcheck path = %q, want empty so z-pages apply", cfg.Deploy.Healthcheck.Path)
-					}
-					if cfg.Deploy.Healthcheck.Readiness != config.DefaultReadinessPath {
-						t.Errorf("readiness = %q, want %s", cfg.Deploy.Healthcheck.Readiness, config.DefaultReadinessPath)
-					}
-					if cfg.Deploy.Healthcheck.Liveness != config.DefaultLivenessPath {
-						t.Errorf("liveness = %q, want %s", cfg.Deploy.Healthcheck.Liveness, config.DefaultLivenessPath)
-					}
-					if cfg.Deploy.Healthcheck.Startup != config.DefaultStartupPath {
-						t.Errorf("startup = %q, want %s", cfg.Deploy.Healthcheck.Startup, config.DefaultStartupPath)
-					}
-				}
-				if !cfg.Registry.ManagesPullSecret() {
-					t.Error("generated config must enable createPullSecret so the first deploy can pull")
-				}
-				if env == "preview" {
-					if cfg.Deploy.Autoscale != nil {
-						t.Error("generated preview should stay at one replica, not an HPA")
-					}
-				} else if cfg.Deploy.Autoscale == nil {
-					t.Errorf("generated %s should default to an HPA", env)
-				}
-			}
-
-			// The preview environment must derive a per-branch namespace, or every
-			// branch would collide on one namespace.
-			preview, err := config.Load(config.LoadOptions{
-				Path: path, Environment: "preview", Strict: true,
-				Vars: map[string]string{"BUIDL_SLUG": "my-branch"},
+			res, err := config.Load(config.LoadOptions{
+				Path:   path,
+				Strict: true,
+				Vars:   map[string]string{"BUIDL_SLUG": "example-branch"},
 			})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("generated config did not validate:\n%v\n\nrendered config:\n%s", err, rendered)
 			}
-			if !strings.Contains(preview.Config.Deploy.Kubernetes.Namespace, "my-branch") {
-				t.Errorf("preview namespace = %q, want it derived from the slug",
-					preview.Config.Deploy.Kubernetes.Namespace)
+
+			cfg := res.Config
+			if cfg.App != det.Name {
+				t.Errorf("App = %q, want %q", cfg.App, det.Name)
 			}
-			if !preview.Config.Deploy.Kubernetes.CreateNamespace {
-				t.Error("preview should create its namespace, since it is ephemeral")
+			if cfg.Environment != "default" {
+				t.Errorf("Environment = %q, want default (no overlays)", cfg.Environment)
 			}
-			if preview.Config.Deploy.Kubernetes.Ephemeral == nil || !*preview.Config.Deploy.Kubernetes.Ephemeral {
-				t.Error("preview should be marked ephemeral so destroy deletes the namespace")
+			if cfg.Deploy.Port != det.Port {
+				t.Errorf("Port = %d, want %d", cfg.Deploy.Port, det.Port)
 			}
-			if preview.Config.Deploy.Autoscale != nil {
-				t.Error("generated preview should stay at one replica, not an HPA")
+			if cfg.Deploy.Strategy.Type != config.StrategyBlueGreen {
+				t.Errorf("strategy = %q, want bluegreen", cfg.Deploy.Strategy.Type)
 			}
-			if preview.Config.Deploy.Replicas == nil || *preview.Config.Deploy.Replicas != 1 {
-				t.Errorf("preview replicas = %v, want 1", preview.Config.Deploy.Replicas)
+			if det.HealthPath != "" {
+				if cfg.Deploy.Healthcheck.Path != det.HealthPath {
+					t.Errorf("healthcheck path = %q, want %q", cfg.Deploy.Healthcheck.Path, det.HealthPath)
+				}
+				if cfg.Deploy.Healthcheck.Readiness != det.HealthPath {
+					t.Errorf("readiness = %q, want the explicit path %q", cfg.Deploy.Healthcheck.Readiness, det.HealthPath)
+				}
+			} else {
+				if cfg.Deploy.Healthcheck.Path != "" {
+					t.Errorf("healthcheck path = %q, want empty so z-pages apply", cfg.Deploy.Healthcheck.Path)
+				}
+				if cfg.Deploy.Healthcheck.Readiness != config.DefaultReadinessPath {
+					t.Errorf("readiness = %q, want %s", cfg.Deploy.Healthcheck.Readiness, config.DefaultReadinessPath)
+				}
+				if cfg.Deploy.Healthcheck.Liveness != config.DefaultLivenessPath {
+					t.Errorf("liveness = %q, want %s", cfg.Deploy.Healthcheck.Liveness, config.DefaultLivenessPath)
+				}
+				if cfg.Deploy.Healthcheck.Startup != config.DefaultStartupPath {
+					t.Errorf("startup = %q, want %s", cfg.Deploy.Healthcheck.Startup, config.DefaultStartupPath)
+				}
+			}
+			if !cfg.Registry.ManagesPullSecret() {
+				t.Error("generated config must enable createPullSecret so the first deploy can pull")
+			}
+			if cfg.Deploy.Autoscale == nil {
+				t.Error("generated config should default to an HPA")
 			}
 		})
 	}
 }
 
-func TestRenderedConfigImpliesStaging(t *testing.T) {
+func TestRenderedConfigIsSingleTarget(t *testing.T) {
 	rendered := renderConfig(project.Detection{
 		Kind: project.KindGo, Stack: project.KindGo,
 		Name: "web", Port: 8080,
 	}, "ghcr.io/acme/web")
 
-	if !strings.Contains(rendered, "defaultEnvironment: staging") {
-		t.Error("generated config should set defaultEnvironment: staging")
+	if strings.Contains(rendered, "defaultEnvironment:") {
+		t.Error("generated config should not set defaultEnvironment")
+	}
+	if strings.Contains(rendered, "environments:") {
+		t.Error("generated config should not declare environment overlays")
 	}
 	if strings.Contains(rendered, "replicas: 2") || strings.Contains(rendered, "replicas: 3") {
-		t.Error("generated config should not pin staging/production replica counts")
+		t.Error("generated config should not pin replica counts")
 	}
-	if !strings.Contains(rendered, "#infra:") {
-		t.Error("generated config should include a commented infra block")
+	if strings.Contains(rendered, "infra:") {
+		t.Error("generated config should not include an infra block; add server writes one")
 	}
-	if !strings.Contains(rendered, "certManagerEmail:") {
-		t.Error("generated infra comments should mention certManagerEmail")
+	if !strings.Contains(rendered, "type: bluegreen") {
+		t.Error("generated config should default to a blue-green update")
 	}
 	// Without this, init then deploy dies on ErrImagePull against GHCR.
 	if !strings.Contains(rendered, "createPullSecret: true") {
@@ -189,16 +162,21 @@ func TestRenderedConfigImpliesStaging(t *testing.T) {
 	}
 
 	res, err := config.Load(config.LoadOptions{
-		Path:        writeTempConfig(t, rendered),
-		Environment: "staging",
-		Strict:      true,
-		Vars:        map[string]string{"BUIDL_SLUG": "example"},
+		Path:   writeTempConfig(t, rendered),
+		Strict: true,
+		Vars:   map[string]string{"BUIDL_SLUG": "example"},
 	})
 	if err != nil {
 		t.Fatalf("generated config must load: %v", err)
 	}
 	if !res.Config.Registry.ManagesPullSecret() {
 		t.Error("generated config must resolve createPullSecret to true")
+	}
+	if res.Config.Environment != "default" {
+		t.Errorf("Environment = %q, want default", res.Config.Environment)
+	}
+	if res.Config.Deploy.Strategy.Type != config.StrategyBlueGreen {
+		t.Errorf("strategy = %q, want bluegreen", res.Config.Deploy.Strategy.Type)
 	}
 }
 
@@ -310,10 +288,9 @@ func TestInitWithoutRegistryProducesAValidConfig(t *testing.T) {
 
 	// Exactly what init does after writing the file.
 	if _, err := config.Load(config.LoadOptions{
-		Path:        writeTempConfig(t, rendered),
-		Environment: "staging",
-		Strict:      true,
-		Vars:        map[string]string{"BUIDL_SLUG": "example"},
+		Path:   writeTempConfig(t, rendered),
+		Strict: true,
+		Vars:   map[string]string{"BUIDL_SLUG": "example"},
 	}); err != nil {
 		t.Fatalf("a config generated without --registry must validate: %v", err)
 	}

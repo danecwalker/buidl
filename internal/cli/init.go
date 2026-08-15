@@ -23,6 +23,7 @@ func newInitCmd(a *App) *cobra.Command {
 		image    string
 		registry string
 		force    bool
+		writeCI  bool
 		noCI     bool
 		noDocker bool
 	)
@@ -34,8 +35,9 @@ func newInitCmd(a *App) *cobra.Command {
 
 Detection covers Go, Node, Python, Ruby, Rust and static sites. If there is no
 Dockerfile, a multi-stage one is generated for the detected stack. Common
-changes go through ` + "`buidl add`" + `, ` + "`buidl environment`" + `, and
-` + "`buidl variable`" + `; edit the file for advanced cases. buidl never
+changes go through ` + "`buidl add server`" + `, ` + "`buidl add domain`" + `,
+` + "`buidl add postgres`" + `, and ` + "`buidl variable`" + `. Named
+environments are opt-in (` + "`buidl environment new`" + `). buidl never
 regenerates these files behind your back.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -99,7 +101,7 @@ regenerates these files behind your back.`,
 				return err
 			}
 
-			if !noCI {
+			if writeCI {
 				if err := a.scaffoldCI(dir, force); err != nil {
 					return err
 				}
@@ -107,10 +109,9 @@ regenerates these files behind your back.`,
 
 			// Validate what we just wrote, so init never leaves a broken config.
 			if _, err := config.Load(config.LoadOptions{
-				Path:        configPath,
-				Environment: "staging",
-				Strict:      true,
-				Vars:        map[string]string{"BUIDL_SLUG": "example"},
+				Path:   configPath,
+				Strict: true,
+				Vars:   map[string]string{"BUIDL_SLUG": "example"},
 			}); err != nil {
 				return fmt.Errorf("the generated config did not validate: %w", err)
 			}
@@ -119,9 +120,10 @@ regenerates these files behind your back.`,
 			a.log.Success("ready")
 			a.log.Info("")
 			a.log.Info("next steps:")
-			a.log.Info("  1. review buidl.yaml (set proxy.host, infra.servers, and certManagerEmail)")
-			a.log.Info("  2. buidl add --database postgres   # optional")
-			a.log.Info("  3. buidl deploy")
+			a.log.Info("  1. buidl add server <ip> --email you@example.com")
+			a.log.Info("  2. buidl add domain <hostname>     # optional; add again for api.example.com")
+			a.log.Info("  3. buidl add postgres              # optional")
+			a.log.Info("  4. buidl deploy")
 			return nil
 		},
 	}
@@ -131,8 +133,10 @@ regenerates these files behind your back.`,
 	f.StringVar(&image, "image", "", "image repository (e.g. ghcr.io/acme/web)")
 	f.StringVar(&registry, "registry", "", "registry host to build the image reference from (e.g. ghcr.io/acme)")
 	f.BoolVar(&force, "force", false, "overwrite existing files")
-	f.BoolVar(&noCI, "no-ci", false, "skip writing a CI workflow")
+	f.BoolVar(&writeCI, "ci", false, "write a GitHub Actions workflow that deploys on push to main")
+	f.BoolVar(&noCI, "no-ci", false, "skip writing a CI workflow (default)")
 	f.BoolVar(&noDocker, "no-dockerfile", false, "skip generating a Dockerfile")
+	_ = noCI // kept so existing scripts that pass --no-ci keep working
 
 	return cmd
 }
@@ -190,9 +194,6 @@ registry:
   # Set false for a public image, or set pullSecret to use one you manage.
   createPullSecret: true
 
-# Used when -e is omitted. Production is never implied.
-defaultEnvironment: staging
-
 build:
   # buildkit builds without a Docker daemon and pushes straight to the registry.
   driver: buildkit
@@ -224,10 +225,8 @@ deploy:
     limits: {memory: 512Mi}
 
   strategy:
-    # maxUnavailable 0 keeps full capacity during a rollout.
-    type: rolling
-    maxUnavailable: "0"
-    maxSurge: 25%%
+    # New pods come up first; traffic flips when they are healthy.
+    type: bluegreen
 
 env:
   clear:
@@ -236,60 +235,6 @@ env:
   # deploy time and are never written to this file.
   secret: []
 `)
-
-	fmt.Fprintf(&b, `
-# Uncomment and list the machines buidl should turn into a cluster.
-# buidl never creates VMs — bring them up with OpenTofu, Terraform, or a
-# cloud console, then put their addresses here. buidl deploy installs
-# Kubernetes, joins the nodes, and ships the app.
-#infra:
-#  ssh:
-#    user: root
-#  kubernetes:
-#    distribution: k3s
-#  addons:
-#    certManagerEmail: you@example.com
-#  servers:
-#    - {host: 203.0.113.10}
-
-# Environments overlay the settings above. buidl deploy targets staging by default.
-environments:
-  staging:
-    deploy:
-      kubernetes:
-        namespace: %s-staging
-        createNamespace: true
-    proxy:
-      host: staging.example.com
-      ssl: true
-    env:
-      clear:
-        LOG_LEVEL: debug
-
-  production:
-    deploy:
-      kubernetes:
-        namespace: %s
-      # Fail the deploy and revert if the new release never becomes healthy.
-      deployTimeout: 10m
-    proxy:
-      host: example.com
-      ssl: true
-
-  # Per-branch preview environments. BUIDL_SLUG is derived from the branch name
-  # (or the PR number in CI), so a new branch needs no configuration at all.
-  # buidl destroy -e preview deletes the namespace when the PR closes.
-  preview:
-    deploy:
-      replicas: 1
-      kubernetes:
-        namespace: %s-preview-${BUIDL_SLUG}
-        createNamespace: true
-        ephemeral: true
-    proxy:
-      host: ${BUIDL_SLUG}.preview.example.com
-      ssl: true
-`, d.Name, d.Name, d.Name)
 
 	return b.String()
 }
