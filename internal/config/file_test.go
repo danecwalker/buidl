@@ -66,6 +66,43 @@ func TestFilePreservesComments(t *testing.T) {
 	}
 }
 
+func TestFileSetBoolAndAppend(t *testing.T) {
+	path := write(t, "app: web\nimage: ghcr.io/acme/web\n")
+	f, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetString([]string{"proxy", "host"}, "example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetBool([]string{"proxy", "ssl"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.AppendUnique([]string{"proxy", "hosts"}, "api.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Load(LoadOptions{Path: path, Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.Proxy.Host != "example.com" {
+		t.Errorf("host = %q", res.Config.Proxy.Host)
+	}
+	if !res.Config.Proxy.SSL {
+		t.Error("ssl should be true")
+	}
+	if len(res.Config.Proxy.Hosts) != 1 || res.Config.Proxy.Hosts[0] != "api.example.com" {
+		t.Errorf("hosts = %v", res.Config.Proxy.Hosts)
+	}
+	if got := f.Strings("proxy", "hosts"); len(got) != 1 || got[0] != "api.example.com" {
+		t.Errorf("Strings = %v", got)
+	}
+}
+
 func TestFileEnvironmentAndSecretEdits(t *testing.T) {
 	path := write(t, commented)
 	f, err := Open(path)

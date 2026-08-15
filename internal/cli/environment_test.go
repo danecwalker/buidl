@@ -24,10 +24,8 @@ func TestEnvironmentListAndNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, name := range []string{"staging", "production", "preview"} {
-		if !strings.Contains(got, name) {
-			t.Errorf("list missing %q:\n%s", name, got)
-		}
+	if !strings.Contains(got, "single environment") && !strings.Contains(got, "no environments") {
+		t.Errorf("list on a slim init file should say there are no overlays:\n%s", got)
 	}
 	// The rename: env list is environments, not variables.
 	if strings.Contains(got, "LOG_LEVEL") {
@@ -53,8 +51,16 @@ func TestEnvironmentListAndNew(t *testing.T) {
 		t.Errorf("host missing:\n%s", s)
 	}
 	// init comments must survive the edit.
-	if !strings.Contains(s, "Used when -e is omitted") {
+	if !strings.Contains(s, "buidl configuration") {
 		t.Errorf("init comments were stripped:\n%s", s)
+	}
+
+	f, err := config.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.DefaultEnvironment() != "qa" {
+		t.Errorf("first environment should become the default, got %q", f.DefaultEnvironment())
 	}
 
 	res, err := config.Load(config.LoadOptions{Path: path, Environment: "qa", Strict: true})

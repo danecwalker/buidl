@@ -127,7 +127,9 @@ func applyDefaults(c *Config) {
 	// --- strategy ---
 	st := &c.Deploy.Strategy
 	if st.Type == "" {
-		st.Type = StrategyRolling
+		// Blue-green is the product default: new pods come up first, then
+		// traffic flips. Files that set type: rolling keep rolling.
+		st.Type = StrategyBlueGreen
 	}
 	if st.MaxSurge == "" {
 		st.MaxSurge = "25%"

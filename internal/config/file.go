@@ -140,6 +140,53 @@ func (f *File) SetString(path []string, value string) error {
 	return f.Set(path, scalarNode(value))
 }
 
+// SetBool sets a boolean scalar at path.
+func (f *File) SetBool(path []string, value bool) error {
+	v := "false"
+	if value {
+		v = "true"
+	}
+	return f.Set(path, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: v})
+}
+
+// Strings returns the scalar values of the sequence at path, or nil.
+func (f *File) Strings(path ...string) []string {
+	n := f.Lookup(path...)
+	if n == nil || n.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var out []string
+	for _, c := range n.Content {
+		if c.Kind == yaml.ScalarNode {
+			out = append(out, c.Value)
+		}
+	}
+	return out
+}
+
+// Append adds value to the sequence at path, creating the sequence if needed.
+func (f *File) Append(path []string, value *yaml.Node) error {
+	if len(path) == 0 {
+		return fmt.Errorf("empty path")
+	}
+	parent, err := f.ensureMapping(path[:len(path)-1]...)
+	if err != nil {
+		return err
+	}
+	key := path[len(path)-1]
+	seq := mapGet(parent, key)
+	if seq == nil || isNull(seq) {
+		seq = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		mapSet(parent, key, seq)
+	}
+	if seq.Kind != yaml.SequenceNode {
+		return fmt.Errorf("%s is not a sequence", strings.Join(path, "."))
+	}
+	seq.Style = 0
+	seq.Content = append(seq.Content, value)
+	return nil
+}
+
 // Delete removes the key at path. Missing keys are a no-op.
 func (f *File) Delete(path ...string) bool {
 	if len(path) == 0 {

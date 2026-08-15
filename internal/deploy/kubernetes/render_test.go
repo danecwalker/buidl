@@ -156,7 +156,10 @@ func TestDeploymentUsesDigestPinnedImage(t *testing.T) {
 }
 
 func TestSelectorExcludesReleaseForRollingUpdates(t *testing.T) {
-	target, req := testRequest(t, renderBase)
+	target, req := testRequest(t, renderBase+`
+  strategy:
+    type: rolling
+`)
 	objs, err := target.Render(req)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -199,7 +202,10 @@ func TestBlueGreenNamesPerReleaseAndPinsServiceSelector(t *testing.T) {
 }
 
 func TestRollingServiceSelectorIsReleaseAgnostic(t *testing.T) {
-	target, req := testRequest(t, renderBase)
+	target, req := testRequest(t, renderBase+`
+  strategy:
+    type: rolling
+`)
 	objs, _ := target.Render(req)
 	svc := findObject(objs, "Service").Object.(*corev1.Service)
 
