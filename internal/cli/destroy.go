@@ -147,6 +147,7 @@ func (a *App) confirmDestroy(cmd *cobra.Command, decision deploy.DestroyDecision
 		return fmt.Errorf("`destroy` is irreversible; pass --yes to confirm")
 	}
 
+	defer a.holdSpinner()()
 	ns := a.cfg.Deploy.Kubernetes.Namespace
 	switch decision.Scope {
 	case deploy.ScopeNamespace:
@@ -170,6 +171,7 @@ func (a *App) confirmStale(cmd *cobra.Command, preview *deploy.DestroyOutcome, a
 		return fmt.Errorf("`destroy --stale` is irreversible; pass --yes to confirm")
 	}
 
+	defer a.holdSpinner()()
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"About to delete %d preview namespace(s) older than %s:\n",
 		len(preview.Namespaces), age)

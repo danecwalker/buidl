@@ -362,6 +362,7 @@ func (a *App) confirmProduction(cmd *cobra.Command, yes bool) error {
 		return nil
 	}
 
+	defer a.holdSpinner()()
 	fmt.Fprintf(cmd.OutOrStdout(), "About to deploy %s to %s (cluster: %s).\n",
 		a.cfg.App, a.cfg.Environment, a.clusterDescription())
 	return a.confirm(cmd, "Continue?", "deploy cancelled")

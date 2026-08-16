@@ -77,6 +77,10 @@ changes after init go through ` + "`buidl add server`" + `, ` + "`buidl add doma
 			for _, note := range det.Notes {
 				a.log.Info("note: %s", note)
 			}
+			// Close the step before the wizard. Leaving it open keeps the
+			// spinner labeled "Detecting project" (and its elapsed timer)
+			// over the y/n questions, which look like a hang.
+			a.log.EndStep()
 
 			resolvedImage, err := resolveImage(image, registry, det.Name)
 			if err != nil {

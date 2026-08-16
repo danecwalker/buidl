@@ -453,6 +453,38 @@ func TestInitWizardNoSkipsCI(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, ".github", "workflows", "deploy.yml")); !os.IsNotExist(err) {
 		t.Fatalf("wizard no must not write a workflow: %v", err)
 	}
+	assertDetectStepClosedBeforeWrite(t, app)
+}
+
+func TestInitClosesDetectStepBeforeWizard(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/web\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	app, _ := newTestApp(t, ui.ModePlain)
+	cmd := newInitCmd(app)
+	cmd.SetArgs([]string{"--registry", "ghcr.io/acme", "--no-ci"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	assertDetectStepClosedBeforeWrite(t, app)
+}
+
+func assertDetectStepClosedBeforeWrite(t *testing.T, app *App) {
+	t.Helper()
+	steps := app.log.Steps()
+	if len(steps) == 0 || steps[0].Name != "Detecting project" {
+		t.Fatalf("first step = %+v, want Detecting project closed first", steps)
+	}
+	if steps[0].Status != ui.StepOK {
+		t.Errorf("detect step status = %q, want ok", steps[0].Status)
+	}
+	for i, s := range steps[1:] {
+		if s.Name == "Detecting project" {
+			t.Errorf("detect step recorded again at index %d", i+1)
+		}
+	}
 }
 
 func runInitCmd(t *testing.T, args ...string) string {

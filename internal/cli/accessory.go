@@ -245,6 +245,7 @@ func (a *App) confirmAccessoryApply(cmd *cobra.Command, plan *deploy.Plan, yes b
 		return nil
 	}
 
+	defer a.holdSpinner()()
 	a.log.Info("")
 	a.log.Warn("this will restart %d accessory pod(s): %s", len(restarting), strings.Join(restarting, ", "))
 	return a.confirm(cmd, "Reconcile the accessories?", "accessory apply cancelled")
