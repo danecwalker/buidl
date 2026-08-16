@@ -11,6 +11,12 @@ do about them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `buidl init` no longer leaves the "Detecting project" spinner running
+  over the setup questions. Detection was already instant; the spinner
+  made it look hung, and its redraw could erase the y/n prompt.
+
 ## [0.4.0] — 2026-08-16
 
 ### Changed

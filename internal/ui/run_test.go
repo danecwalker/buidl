@@ -351,3 +351,44 @@ func TestSpinnerNeverWritesToANonTerminal(t *testing.T) {
 		}
 	}
 }
+
+// TestPauseSpinnerStopsAnimation is the property a prompt relies on: once
+// paused, the spinner is not on screen and will not redraw.
+func TestPauseSpinnerStopsAnimation(t *testing.T) {
+	clearCIEnv(t)
+	var out bytes.Buffer
+	p := New(Options{Out: &out, Mode: ModePretty})
+	p.Step("Working")
+
+	p.mu.Lock()
+	p.spin.active = true
+	p.spin.drawn = true
+	p.spin.stop = make(chan struct{})
+	p.mu.Unlock()
+
+	p.PauseSpinner()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.spin.active {
+		t.Error("PauseSpinner left the spinner running")
+	}
+	if p.spin.drawn {
+		t.Error("PauseSpinner left a spinner line on screen")
+	}
+}
+
+func TestResumeSpinnerIsNoopWithoutOpenStep(t *testing.T) {
+	clearCIEnv(t)
+	var out bytes.Buffer
+	p := New(Options{Out: &out, Mode: ModePretty})
+	p.ResumeSpinner()
+	p.Step("Working")
+	p.EndStep()
+	p.ResumeSpinner()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.spin.active {
+		t.Error("ResumeSpinner must not start when no step is open")
+	}
+}

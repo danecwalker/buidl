@@ -540,10 +540,21 @@ func (a *App) canPrompt(cmd *cobra.Command) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
+// holdSpinner pauses the step spinner for a prompt. The redraw uses
+// carriage-return + erase-line, which would wipe the question.
+func (a *App) holdSpinner() func() {
+	if a.log == nil {
+		return func() {}
+	}
+	a.log.PauseSpinner()
+	return a.log.ResumeSpinner
+}
+
 // askYesNo asks a CRA-style y/n question. An empty answer, EOF, or anything
 // other than yes/no uses defaultYes. This is a setup question, not a
 // confirmation: declining is a valid choice, not a cancellation.
 func (a *App) askYesNo(cmd *cobra.Command, question string, defaultYes bool) (bool, error) {
+	defer a.holdSpinner()()
 	hint := "[y/N]"
 	if defaultYes {
 		hint = "[Y/n]"
@@ -572,6 +583,7 @@ func (a *App) askYesNo(cmd *cobra.Command, question string, defaultYes bool) (bo
 // stdin, which is treated as declining: a destructive command must never
 // proceed because nobody was there to say no.
 func (a *App) confirm(cmd *cobra.Command, question, cancelled string) error {
+	defer a.holdSpinner()()
 	fmt.Fprintf(cmd.OutOrStdout(), "%s [y/N] ", question)
 
 	var answer string

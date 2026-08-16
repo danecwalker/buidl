@@ -39,6 +39,24 @@ func (p *Printer) spinnerEnabled() bool {
 	return p.mode == ModePretty && isTerminal(p.out)
 }
 
+// PauseSpinner stops the animation and clears its line so a prompt can
+// occupy the terminal. Without this, the 100ms redraw erases the question.
+func (p *Printer) PauseSpinner() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopSpinnerLocked()
+}
+
+// ResumeSpinner restarts the animation when a step is still open.
+func (p *Printer) ResumeSpinner() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.step == "" || p.stepStatus != StepRunning {
+		return
+	}
+	p.startSpinnerLocked(p.step)
+}
+
 // startSpinner begins animating for a step. The caller must hold the lock.
 func (p *Printer) startSpinnerLocked(label string) {
 	if !p.spinnerEnabled() {
