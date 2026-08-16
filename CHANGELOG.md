@@ -11,6 +11,14 @@ do about them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `buidl watch` no longer smears tables across the screen. In a live
+  session a newline did not return the cursor to column zero, so each
+  refresh continued to the right and leftover characters from the
+  loading frame stayed put. Long app and pod names are truncated so
+  they cannot wrap.
+
 ## [0.5.0] — 2026-08-17
 
 ### Added

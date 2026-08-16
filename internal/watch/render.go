@@ -47,7 +47,7 @@ func Render(v View) string {
 	if v.Snapshot.Time.IsZero() && v.Err == "" && len(v.Snapshot.Apps) == 0 {
 		lines = append(lines, v.paint("  loading…", attrDim))
 		lines = append(lines, v.footer()...)
-		return strings.Join(lines, "\n")
+		return strings.Join(clipLines(lines, v.Width), "\n")
 	}
 	if v.Err != "" {
 		lines = append(lines, v.paint("  "+oneLine(v.Err), attrRed))
@@ -92,7 +92,7 @@ func Render(v View) string {
 		lines = append(lines, "")
 	}
 	lines = append(lines, footer...)
-	return strings.Join(lines, "\n")
+	return strings.Join(clipLines(lines, v.Width), "\n")
 }
 
 func (v View) header() []string {
@@ -318,6 +318,7 @@ type column struct {
 
 func (v View) table(title string, cols []column, color func(row int, header, cell string) string) []string {
 	cols = fitColumns(cols, v.Width)
+	cols = shrinkColumns(cols, v.Width)
 	widths := make([]int, len(cols))
 	rows := 0
 	for i, c := range cols {
@@ -376,6 +377,52 @@ func fitColumns(cols []column, width int) []column {
 			return cols
 		}
 	}
+}
+
+// shrinkColumns trims the widest remaining column when dropping columns
+// still leaves the table wider than the terminal. Pod names and dirty
+// release ids are the usual offenders.
+func shrinkColumns(cols []column, width int) []column {
+	if width <= 0 || len(cols) == 0 {
+		return cols
+	}
+	for {
+		widths := columnWidths(cols)
+		extra := totalWidth(widths) - width
+		if extra <= 0 {
+			return cols
+		}
+		widest := 0
+		for i, w := range widths {
+			if w > widths[widest] {
+				widest = i
+			}
+		}
+		target := widths[widest] - extra
+		if target < 4 {
+			target = 4
+		}
+		if target >= widths[widest] {
+			return cols
+		}
+		cols[widest].header = truncateRunes(cols[widest].header, target)
+		for i, cell := range cols[widest].cells {
+			cols[widest].cells[i] = truncateRunes(cell, target)
+		}
+	}
+}
+
+func columnWidths(cols []column) []int {
+	widths := make([]int, len(cols))
+	for i, c := range cols {
+		widths[i] = utf8.RuneCountInString(c.header)
+		for _, cell := range c.cells {
+			if n := utf8.RuneCountInString(cell); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+	return widths
 }
 
 func dropOneColumn(cols *[]column) bool {
@@ -481,6 +528,23 @@ func stripANSI(s string) string {
 		i++
 	}
 	return b.String()
+}
+
+// clipLines keeps every row inside the terminal width. A wrap in raw
+// mode would put the next write on the following line and smear the frame.
+func clipLines(lines []string, width int) []string {
+	if width <= 0 {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		if utf8.RuneCountInString(stripANSI(line)) <= width {
+			out[i] = line
+			continue
+		}
+		out[i] = truncateRunes(stripANSI(line), width)
+	}
+	return out
 }
 
 func truncateRunes(s string, n int) string {
