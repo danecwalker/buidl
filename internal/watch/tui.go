@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/term"
@@ -16,6 +17,7 @@ const (
 	hideCursor = "\033[?25l"
 	showCursor = "\033[?25h"
 	homeCursor = "\033[H"
+	clearEOL   = "\033[K"
 	clearEOS   = "\033[J"
 
 	// collectBound keeps one hung apiserver call from freezing the frame
@@ -128,8 +130,7 @@ func Live(ctx context.Context, opts Options) error {
 			Interactive: true,
 			Err:         lastErr,
 		}
-		frame := Render(v)
-		_, _ = io.WriteString(opts.Stdout, homeCursor+frame+clearEOS)
+		writeFrame(opts.Stdout, Render(v))
 	}
 
 	kick()
@@ -227,6 +228,28 @@ func readKeys(ctx context.Context, r io.Reader, out chan<- byte) {
 			return
 		}
 	}
+}
+
+// writeFrame paints one dashboard in raw mode.
+//
+// term.MakeRaw clears OPOST, so ONLCR is off and \n is a line feed only —
+// the cursor stays in the same column. Each line therefore ends with
+// erase-to-EOL and a CR before the next LF. The last line is not followed
+// by LF so a full-height frame does not scroll. clear-to-EOS then drops
+// leftover rows from a taller previous frame.
+func writeFrame(w io.Writer, frame string) {
+	var b strings.Builder
+	b.WriteString(homeCursor)
+	lines := strings.Split(frame, "\n")
+	for i, line := range lines {
+		b.WriteString(line)
+		b.WriteString(clearEOL)
+		if i < len(lines)-1 {
+			b.WriteString("\r\n")
+		}
+	}
+	b.WriteString(clearEOS)
+	_, _ = io.WriteString(w, b.String())
 }
 
 func termSize(fd int) (int, int) {

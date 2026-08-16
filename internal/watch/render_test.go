@@ -176,3 +176,19 @@ func TestRenderColorPaintsHealth(t *testing.T) {
 		t.Errorf("colored healthy row should use green:\n%s", out)
 	}
 }
+
+func TestRenderTruncatesLongNamesToTerminalWidth(t *testing.T) {
+	snap := sampleSnapshot()
+	snap.Apps[0].Name = "community-counter"
+	snap.Apps[0].Release = "e86ff6a-dirty-tjvak5"
+	snap.Apps[0].Instances[0].Name = "community-counter-e86ff6a-dirty-tjvak5-7d8f9c4b6-xk2n4"
+	out := Render(View{Snapshot: snap, Width: 56, Interactive: true})
+	for _, line := range strings.Split(out, "\n") {
+		if n := len([]rune(line)); n > 56 {
+			t.Errorf("line wider than terminal (%d): %q", n, line)
+		}
+	}
+	if !strings.Contains(out, "…") {
+		t.Errorf("expected a truncated name on a narrow terminal:\n%s", out)
+	}
+}
