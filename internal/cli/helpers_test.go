@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/danecwalker/buidl/internal/config"
+	"github.com/danecwalker/buidl/internal/inventory"
 	"github.com/danecwalker/buidl/internal/secrets"
 	"github.com/danecwalker/buidl/internal/ui"
 )
@@ -98,5 +99,52 @@ accessories:
 	}
 	if !strings.Contains(err.Error(), ".buidl/secrets") {
 		t.Errorf("error should point at .buidl/secrets, got: %v", err)
+	}
+}
+
+func TestRequireSideloadServers(t *testing.T) {
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.cfg = &config.Config{Image: "buidl.local/web"}
+	err := app.requireSideloadServers()
+	if err == nil {
+		t.Fatal("expected an error with no servers")
+	}
+	if !strings.Contains(err.Error(), "add server") {
+		t.Errorf("error should tell the user to add a server, got: %v", err)
+	}
+
+	app.cfg.Infra = &config.Infra{
+		Servers: []inventory.Server{{Host: "10.0.0.1", Role: inventory.RoleControlPlane}},
+	}
+	if err := app.requireSideloadServers(); err != nil {
+		t.Fatalf("servers present: %v", err)
+	}
+}
+
+func TestSideloadLocalImageDeletesArchive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "img.tar")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.cfg = &config.Config{Image: "ghcr.io/acme/web"}
+	if err := app.sideloadLocalImage(t.Context(), nil, app.cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("archive should be deleted after deploy even when it is not transferred")
+	}
+
+	path = filepath.Join(t.TempDir(), "local.tar")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg = &config.Config{Image: "buidl.local/web"}
+	err := app.sideloadLocalImage(t.Context(), nil, app.cfg, path)
+	if err == nil {
+		t.Fatal("expected sideload to fail without servers")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatal("archive should be deleted after a failed sideload")
 	}
 }

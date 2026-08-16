@@ -186,11 +186,10 @@ func resolveImage(image, registry, app string) (string, error) {
 	if registry != "" {
 		return strings.ToLower(strings.TrimSuffix(registry, "/") + "/" + app), nil
 	}
-	// A placeholder is better than a guess: the user must supply a real registry.
-	// It must be lowercase, because an image reference with uppercase characters is
-	// invalid — an uppercase placeholder would make the config buidl just wrote
-	// fail its own validation.
-	return "ghcr.io/change-me/" + app, nil
+	// No registry: deploy will build locally and copy the image onto each
+	// server. The host must be lowercase — an uppercase image reference is
+	// invalid and would make the config we just wrote fail its own validation.
+	return config.LocalImageRepo(app), nil
 }
 
 // renderConfig produces the starter buidl.yaml.
@@ -207,7 +206,25 @@ version: %d
 app: %s
 image: %s
 
-registry:
+`, config.SchemaVersion, d.Name, image)
+
+	if config.IsLocalImage(image) {
+		fmt.Fprintf(&b, `registry:
+  # No registry is configured. Deploy builds locally, copies the image
+  # onto each server, and does not pull. Pass --registry (or --image)
+  # to push to GHCR, Docker Hub, etc. instead.
+  createPullSecret: false
+
+build:
+  # buildkit builds without a Docker daemon. With no registry the
+  # image is exported as an archive and copied over SSH.
+  driver: buildkit
+  dockerfile: %s
+  # Local transfer is single-arch. Add a registry to publish multi-arch.
+  platforms: [linux/amd64]
+`, dockerfilePath(d))
+	} else {
+		fmt.Fprintf(&b, `registry:
   # The cluster cannot use your local docker login. Copy that credential
   # into an imagePullSecret so pods can pull the image you just pushed.
   # Set false for a public image, or set pullSecret to use one you manage.
@@ -219,7 +236,10 @@ build:
   dockerfile: %s
   # Add linux/arm64 here to publish a multi-arch image.
   platforms: [linux/amd64]
+`, dockerfilePath(d))
+	}
 
+	fmt.Fprintf(&b, `
 deploy:
   target: kubernetes
   port: %d
@@ -238,7 +258,7 @@ deploy:
     # /livez restarts a wedged process. Keep it cheap — do not check
     # Postgres here, or a blip kills the pod.
     # Set path: /up to use one endpoint for all three (Rails/Kamal).
-`, config.SchemaVersion, d.Name, image, dockerfilePath(d), d.Port)
+`, d.Port)
 	if d.HealthPath != "" {
 		fmt.Fprintf(&b, "    path: %s\n", d.HealthPath)
 	}

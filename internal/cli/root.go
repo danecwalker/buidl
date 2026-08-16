@@ -92,6 +92,7 @@ One directory is one stack. Everything you run in that stack is an app.
   buidl add api --image ghcr.io/myorg/api --host api.example.com
   buidl deploy
   buidl status
+  buidl watch
   buidl logs
   buidl rollback
   buidl destroy
@@ -128,6 +129,7 @@ One directory is one stack. Everything you run in that stack is an app.
 		newRollbackCmd(app),
 		newDestroyCmd(app),
 		newStatusCmd(app),
+		newWatchCmd(app),
 		newReleasesCmd(app),
 		newLogsCmd(app),
 		newManifestCmd(app),

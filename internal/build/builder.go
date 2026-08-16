@@ -7,8 +7,10 @@
 //   - No 200MB+ daemon to install on a CI runner or a developer laptop.
 //   - Builds can run rootless, or be delegated to a buildkitd Pod inside the
 //     target cluster, so CI needs no privileged container.
-//   - The image is exported straight to the registry. It never lands in a local
-//     image store, so there is no `docker push` step to fail separately.
+//   - With a registry, the image is exported straight there. It never lands in a
+//     local image store, so there is no `docker push` step to fail separately.
+//   - With no registry (image: buidl.local/...), the image is written to a
+//     temporary archive for SSH sideload onto the servers.
 package build
 
 import (
@@ -29,9 +31,10 @@ type Request struct {
 	Config *config.Config
 	// Release supplies the tag and provenance labels to stamp onto the image.
 	Release release.Release
-	// Push exports the image to the registry. A deploy always requires this,
-	// since the cluster pulls the image; `buidl build --no-push` exists only for
-	// validating that a build succeeds.
+	// Push exports the image to the registry. A deploy always requires this
+	// when the image is a registry repository. Local images ignore it and
+	// write an archive instead. `buidl build --no-push` exists only for
+	// validating that a registry build succeeds.
 	Push bool
 	// NoCache ignores all cache sources.
 	NoCache bool
@@ -55,6 +58,9 @@ type Result struct {
 	Duration  time.Duration
 	// Pushed reports whether the image reached the registry.
 	Pushed bool
+	// Archive is the local docker-save tar for a no-registry build. The
+	// caller copies it onto each server and must delete it afterwards.
+	Archive string
 }
 
 // Builder produces an image for a Request.

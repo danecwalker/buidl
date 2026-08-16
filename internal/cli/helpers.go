@@ -12,6 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/danecwalker/buidl/internal/build"
+	"github.com/danecwalker/buidl/internal/cluster"
 	"github.com/danecwalker/buidl/internal/config"
 	"github.com/danecwalker/buidl/internal/deploy"
 	"github.com/danecwalker/buidl/internal/hooks"
@@ -202,16 +203,21 @@ func (a *App) runHook(ctx context.Context, point hooks.Point, hookCtx hooks.Cont
 }
 
 // buildRelease builds (or resolves) the image and returns a digest-pinned
-// release.
-func (a *App) buildRelease(ctx context.Context, rel release.Release, push, noCache bool, platforms []string) (release.Release, error) {
+// release. The archive path is set for a no-registry build; the caller
+// copies it onto the servers and must delete it.
+func (a *App) buildRelease(ctx context.Context, rel release.Release, push, noCache bool, platforms []string) (release.Release, string, error) {
 	builder, err := build.For(a.cfg, a.log)
 	if err != nil {
-		return rel, err
+		return rel, "", err
 	}
 	defer builder.Close()
 
 	if err := builder.Available(ctx); err != nil {
-		return rel, err
+		return rel, "", err
+	}
+
+	if a.cfg.LocalImage() {
+		push = false
 	}
 
 	a.log.Step(fmt.Sprintf("Building %s", rel.TagRef()))
@@ -227,13 +233,61 @@ func (a *App) buildRelease(ctx context.Context, rel release.Release, push, noCac
 		Plain: a.log.Mode() != ui.ModePretty,
 	})
 	if err != nil {
-		return rel, err
+		return rel, "", err
 	}
 
 	rel.Digest = result.Digest
+	if a.cfg.LocalImage() && result.Archive == "" {
+		return rel, "", fmt.Errorf("local build produced no archive to copy onto the servers")
+	}
 	a.log.StepDetail("%s%s", rel.ShortDigest(), platformNote(result.Platforms))
 	a.log.Success("built %s in %s", rel.ShortDigest(), result.Duration.Round(time.Millisecond))
-	return rel, nil
+	return rel, result.Archive, nil
+}
+
+// requireSideloadServers fails before a long local build if there is nowhere
+// to copy the archive.
+func (a *App) requireSideloadServers() error {
+	if a.cfg != nil && a.cfg.Infra != nil && len(a.cfg.Infra.Servers) > 0 {
+		return nil
+	}
+	return fmt.Errorf("no registry and no servers to copy the image onto\n\nhint: buidl add server <ip> --email you@example.com\n      or re-init with --registry ghcr.io/<org> to push instead")
+}
+
+// sideloadLocalImage copies a no-registry build onto every node, then
+// deletes the local archive. archive may be empty (shared digest, or
+// --digest of an image already on the nodes).
+func (a *App) sideloadLocalImage(ctx context.Context, mgr *cluster.Manager, cfg *config.Config, archive string) error {
+	if archive != "" {
+		defer os.Remove(archive)
+	}
+	if cfg == nil || !cfg.LocalImage() || archive == "" {
+		return nil
+	}
+
+	closeMgr := false
+	if mgr == nil {
+		if err := a.requireSideloadServers(); err != nil {
+			return err
+		}
+		var err error
+		mgr, err = cluster.New(a.cfg.Infra, a.log)
+		if err != nil {
+			return err
+		}
+		closeMgr = true
+	}
+	if closeMgr {
+		defer mgr.Close()
+	}
+
+	a.log.Step(fmt.Sprintf("Copying image to %d server(s)", len(a.cfg.Infra.Servers)))
+	n, err := mgr.SideloadImage(ctx, archive)
+	if err != nil {
+		return err
+	}
+	a.log.Success("copied image onto %d server(s)", n)
+	return nil
 }
 
 // platformNote annotates a multi-arch build, which is worth surfacing because it

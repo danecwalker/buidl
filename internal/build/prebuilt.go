@@ -46,6 +46,10 @@ func (p *Prebuilt) Close() error { return nil }
 func (p *Prebuilt) Build(ctx context.Context, req Request) (Result, error) {
 	start := time.Now()
 
+	if req.Config.LocalImage() {
+		return Result{}, fmt.Errorf("driver prebuilt needs a registry; %s is a local image\n\nhint: drop driver: prebuilt, or set image to a registry repository", req.Config.Image)
+	}
+
 	ref := req.Release.Ref()
 	digest, err := Resolve(ctx, ref)
 	if err != nil {

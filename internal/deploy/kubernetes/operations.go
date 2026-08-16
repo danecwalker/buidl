@@ -67,8 +67,9 @@ func (t *Target) Preflight(ctx context.Context, req deploy.Request) error {
 	}
 
 	// 5. Does the image exist in the registry? The kubelet's failure mode for a
-	//    missing image is a slow ImagePullBackOff.
-	if req.Release.Pinned() {
+	//    missing image is a slow ImagePullBackOff. A local image was copied
+	//    onto the nodes; there is no registry to ask.
+	if req.Release.Pinned() && !cfg.LocalImage() {
 		if _, err := build.Resolve(ctx, req.Release.Ref()); err != nil {
 			return fmt.Errorf("image %s is not available: %w", req.Release.Ref(), err)
 		}

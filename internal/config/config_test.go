@@ -24,6 +24,58 @@ app: web
 image: ghcr.io/acme/web
 `
 
+func TestLocalImageDetection(t *testing.T) {
+	if !IsLocalImage("buidl.local/web") {
+		t.Error("buidl.local/web must be local")
+	}
+	if !IsLocalImage("ghcr.io/change-me/web") {
+		t.Error("legacy placeholder must stay local so existing inits still sideload")
+	}
+	if IsLocalImage("ghcr.io/acme/web") {
+		t.Error("a real registry image must not be treated as local")
+	}
+	if IsLocalImage("ghcr.io/change-me-not/web") {
+		t.Error("change-me must be an exact path prefix")
+	}
+	if LocalImageRepo("Web") != "buidl.local/web" {
+		t.Errorf("LocalImageRepo = %q", LocalImageRepo("Web"))
+	}
+	var nilCfg *Config
+	if nilCfg.LocalImage() {
+		t.Error("nil config is not a local image")
+	}
+}
+
+func TestLocalImageDefaults(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, "app: web\nimage: buidl.local/web\n"), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg := res.Config
+	if !cfg.LocalImage() {
+		t.Fatal("expected LocalImage")
+	}
+	if cfg.Build.Cache != "none" {
+		t.Errorf("Cache = %q, want none", cfg.Build.Cache)
+	}
+	if cfg.Registry.ManagesPullSecret() {
+		t.Error("local image must not default createPullSecret on")
+	}
+}
+
+func TestLegacyPlaceholderDefaultsAreLocal(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, "app: web\nimage: ghcr.io/change-me/web\n"), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !res.Config.LocalImage() {
+		t.Fatal("ghcr.io/change-me/* must still sideload")
+	}
+	if res.Config.Build.Cache != "none" {
+		t.Errorf("Cache = %q, want none", res.Config.Build.Cache)
+	}
+}
+
 func TestLoadMinimalAppliesDefaults(t *testing.T) {
 	res, err := Load(LoadOptions{Path: write(t, minimal), Strict: true})
 	if err != nil {

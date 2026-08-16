@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -35,9 +36,10 @@ func newBuildCmd(a *App) *cobra.Command {
 		Short:  "Build and push a container image",
 		Long: `Build the application image with BuildKit and push it to the registry.
 
-No Docker daemon is required. The image is exported straight to the registry and
-identified by its digest, which is printed on success so a later deploy can pin
-to it exactly.`,
+No Docker daemon is required. With a registry the image is exported straight
+there. With no registry (image: buidl.local/...) deploy copies the archive
+onto the servers instead. The digest is printed on success so a later
+deploy can pin to it exactly.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
@@ -54,9 +56,12 @@ to it exactly.`,
 			}
 
 			rel := a.newRelease(releaseID)
-			rel, err := a.buildRelease(ctx, rel, push, noCache, platforms)
+			rel, archive, err := a.buildRelease(ctx, rel, push, noCache, platforms)
 			if err != nil {
 				return err
+			}
+			if archive != "" {
+				defer os.Remove(archive)
 			}
 
 			a.log.EndStep()
@@ -65,7 +70,9 @@ to it exactly.`,
 				"digest":  rel.Digest,
 				"ref":     rel.Ref(),
 			})
-			if !push {
+			if archive != "" {
+				a.log.Warn("no registry; image was not pushed. deploy will rebuild, copy onto the servers, and delete the archive")
+			} else if !push {
 				a.log.Warn("image was not pushed (--push=false); it cannot be deployed")
 			}
 
@@ -106,7 +113,7 @@ func newDeployCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deploy [APP]",
 		Short: "Converge the cluster if needed, then build and deploy a release",
-		Long: `Build the image, push it, and roll it out.
+		Long: `Build the image, push it (or copy it onto the servers when there is no registry), and roll it out.
 
 With no name this deploys every process app in the stack and creates
 stateful apps (postgres, redis) that are not in the cluster yet. Later
@@ -184,8 +191,11 @@ Examples:
 			// Converge the cluster before anything that needs to talk to it.
 			// Building first would waste a long build on a cluster that turns out
 			// not to exist.
+			var mgr *cluster.Manager
 			if !skipCluster {
-				mgr, clusterPlan, err := a.clusterPlan(ctx)
+				var clusterPlan *cluster.Plan
+				var err error
+				mgr, clusterPlan, err = a.clusterPlan(ctx)
 				if err != nil {
 					return err
 				}
@@ -244,11 +254,15 @@ Examples:
 				return err
 			}
 
+			var archive string
 			switch {
 			case digest != "":
 				// An explicit digest deploys a specific, already-built artifact.
 				rel.Digest = digest
 			case skipBuild:
+				if processCfg.LocalImage() {
+					return fmt.Errorf("cannot --skip-build a local image; there is no registry to resolve\n\nhint: drop --skip-build, or pass --digest of an image already copied onto the servers")
+				}
 				// Resolve the tag that a previous `buidl build` pushed.
 				a.log.Step("Resolving image")
 				resolved, err := build.Resolve(ctx, rel.TagRef())
@@ -258,10 +272,19 @@ Examples:
 				rel.Digest = resolved
 				a.log.Detail("resolved %s", rel.ShortDigest())
 			default:
-				rel, err = a.buildReleaseFor(ctx, processCfg, rel, true, noCache, nil)
+				if processCfg.LocalImage() {
+					if err := a.requireSideloadServers(); err != nil {
+						return err
+					}
+				}
+				rel, archive, err = a.buildReleaseFor(ctx, processCfg, rel, true, noCache, nil)
 				if err != nil {
 					return err
 				}
+			}
+
+			if err := a.sideloadLocalImage(ctx, mgr, processCfg, archive); err != nil {
+				return err
 			}
 
 			// The digest is only known after the build, so refresh the hook context.
@@ -325,7 +348,7 @@ Examples:
 			a.reportOutcome(outcome)
 
 			if targetApp == "" {
-				if err := a.deployExtraProcesses(ctx, target, stack, rel, secretValues, !noWait, autoRollback, skipBuild, digest, noCache); err != nil {
+				if err := a.deployExtraProcesses(ctx, target, stack, rel, secretValues, !noWait, autoRollback, skipBuild, digest, noCache, mgr); err != nil {
 					return err
 				}
 			}
@@ -755,7 +778,7 @@ func (a *App) processAppOrError(name string) (*config.Config, error) {
 
 // buildReleaseFor builds using cfg's image repository without changing the
 // stack config on a.cfg (cluster context is named after the stack app).
-func (a *App) buildReleaseFor(ctx context.Context, cfg *config.Config, rel release.Release, push, noCache bool, platforms []string) (release.Release, error) {
+func (a *App) buildReleaseFor(ctx context.Context, cfg *config.Config, rel release.Release, push, noCache bool, platforms []string) (release.Release, string, error) {
 	prev := a.cfg
 	a.cfg = cfg
 	defer func() { a.cfg = prev }()
@@ -765,7 +788,7 @@ func (a *App) buildReleaseFor(ctx context.Context, cfg *config.Config, rel relea
 // deployExtraProcesses rolls out every extra process app after the first
 // process. Same image as the primary reuses that digest; a different
 // repository is built (or resolved) on its own.
-func (a *App) deployExtraProcesses(ctx context.Context, target deploy.Target, stack *config.Config, primary release.Release, secretValues map[string]string, wait, autoRollback, skipBuild bool, digest string, noCache bool) error {
+func (a *App) deployExtraProcesses(ctx context.Context, target deploy.Target, stack *config.Config, primary release.Release, secretValues map[string]string, wait, autoRollback, skipBuild bool, digest string, noCache bool, mgr *cluster.Manager) error {
 	extras := stack.ProcessAppNames()
 	if len(extras) <= 1 {
 		return nil
@@ -778,10 +801,14 @@ func (a *App) deployExtraProcesses(ctx context.Context, target deploy.Target, st
 		rel := a.newRelease(primary.ID)
 		rel.Repo = cfg.Image
 		rel.Git = primary.Git
+		var archive string
 		switch {
 		case cfg.Image == primary.Repo && primary.Digest != "":
 			rel.Digest = primary.Digest
 		case skipBuild:
+			if cfg.LocalImage() {
+				return fmt.Errorf("%s: cannot --skip-build a local image; there is no registry to resolve", name)
+			}
 			a.log.Step(fmt.Sprintf("Resolving %s", rel.TagRef()))
 			resolved, err := build.Resolve(ctx, rel.TagRef())
 			if err != nil {
@@ -789,10 +816,13 @@ func (a *App) deployExtraProcesses(ctx context.Context, target deploy.Target, st
 			}
 			rel.Digest = resolved
 		default:
-			rel, err = a.buildReleaseFor(ctx, cfg, rel, true, noCache, nil)
+			rel, archive, err = a.buildReleaseFor(ctx, cfg, rel, true, noCache, nil)
 			if err != nil {
 				return fmt.Errorf("%s: %w", name, err)
 			}
+		}
+		if err := a.sideloadLocalImage(ctx, mgr, cfg, archive); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
 		}
 
 		secrets := secretValues
@@ -902,6 +932,22 @@ func (a *App) runPlan(cmd *cobra.Command, targetApp string, detailed, detailedEx
 		switch {
 		case digest != "":
 			rel.Digest = digest
+		case proc.LocalImage():
+			rel.Digest = placeholderDigest
+			if d, ok := resolved[proc.Image]; ok {
+				rel.Digest = d
+			} else {
+				resolved[proc.Image] = placeholderDigest
+			}
+			n := 0
+			if stack.Infra != nil {
+				n = len(stack.Infra.Servers)
+			}
+			if n == 0 {
+				a.log.Warn("local image %s; deploy will fail without servers (`buidl add server` or `--registry`)", proc.Image)
+			} else {
+				a.log.Info("local image %s: deploy will copy onto %d server(s)", proc.Image, n)
+			}
 		default:
 			if d, ok := resolved[proc.Image]; ok {
 				rel.Digest = d

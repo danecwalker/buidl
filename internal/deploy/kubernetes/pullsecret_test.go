@@ -13,6 +13,21 @@ import (
 	"github.com/danecwalker/buidl/internal/deploy"
 )
 
+func TestLocalImageSkipsManagedPullSecret(t *testing.T) {
+	target, req := testRequest(t, `
+app: web
+image: buidl.local/web
+registry:
+  createPullSecret: true
+deploy:
+  replicas: 1
+`)
+	req.Release.Repo = "buidl.local/web"
+	if target.managedPullSecret(req.Config) {
+		t.Fatal("local image must not create a pull secret even if createPullSecret is true")
+	}
+}
+
 func TestRenderCreatesManagedPullSecret(t *testing.T) {
 	target, req := testRequest(t, `
 app: web

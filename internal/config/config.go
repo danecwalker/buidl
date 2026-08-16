@@ -66,6 +66,37 @@ type Config struct {
 	Environment string `yaml:"-"`
 }
 
+// LocalImageHost is the repository prefix written when init runs without
+// --registry or --image. It is not a real registry: deploy builds a local
+// archive, copies it onto each server, and the kubelet never pulls.
+const LocalImageHost = "buidl.local"
+
+// localImagePlaceholder is the repository prefix init wrote before local
+// sideload existed. Those files must keep working without a registry.
+const localImagePlaceholder = "ghcr.io/change-me/"
+
+// IsLocalImage reports whether image is transferred by archive rather than
+// pushed to a registry.
+func IsLocalImage(image string) bool {
+	image = strings.ToLower(strings.TrimSpace(image))
+	return strings.HasPrefix(image, LocalImageHost+"/") ||
+		strings.HasPrefix(image, localImagePlaceholder)
+}
+
+// LocalImageRepo is the repository init writes when no registry is given.
+func LocalImageRepo(app string) string {
+	return LocalImageHost + "/" + strings.ToLower(app)
+}
+
+// LocalImage reports whether this config's image is sideloaded onto the
+// servers instead of pushed to a registry.
+func (c *Config) LocalImage() bool {
+	if c == nil {
+		return false
+	}
+	return IsLocalImage(c.Image)
+}
+
 // Registry describes how to authenticate to the image registry.
 //
 // There are two distinct authentication problems here, and conflating them is a

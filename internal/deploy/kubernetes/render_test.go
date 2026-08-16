@@ -137,6 +137,36 @@ func TestRenderRequiresDigest(t *testing.T) {
 	}
 }
 
+func TestLocalImageUsesPullNever(t *testing.T) {
+	target, req := testRequest(t, `
+app: web
+image: buidl.local/web
+deploy:
+  replicas: 1
+`)
+	req.Release.Repo = "buidl.local/web"
+	objs, err := target.Render(req)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	dep := findObject(objs, "Deployment").Object.(*appsv1.Deployment)
+	c := dep.Spec.Template.Spec.Containers[0]
+	if c.ImagePullPolicy != corev1.PullNever {
+		t.Errorf("ImagePullPolicy = %q, want Never so kubelet does not hit a registry", c.ImagePullPolicy)
+	}
+	if !strings.Contains(c.Image, "buidl.local/web@sha256:") {
+		t.Errorf("image = %q, want a digest-pinned local ref", c.Image)
+	}
+	for _, obj := range objs {
+		if obj.Kind != "Secret" {
+			continue
+		}
+		if sec, ok := obj.Object.(*corev1.Secret); ok && sec.Type == corev1.SecretTypeDockerConfigJson {
+			t.Fatal("local image must not render a pull secret")
+		}
+	}
+}
+
 func TestDeploymentUsesDigestPinnedImage(t *testing.T) {
 	target, req := testRequest(t, renderBase)
 	objs, err := target.Render(req)
