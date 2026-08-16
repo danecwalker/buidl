@@ -110,8 +110,8 @@ func (t *Target) Plan(ctx context.Context, req deploy.Request) (*deploy.Plan, er
 	if replicas(req.Config) == 0 {
 		plan.Warnings = append(plan.Warnings, "deploy.replicas is 0; this will take the app offline")
 	}
-	if exists, err := t.namespaceExists(ctx); err == nil && !exists && !req.Config.Deploy.Kubernetes.CreateNamespace {
-		plan.Warnings = append(plan.Warnings, fmt.Sprintf("namespace %q does not exist; set deploy.kubernetes.createNamespace: true or create it first", t.Namespace))
+	if exists, err := t.namespaceExists(ctx); err == nil && !exists && !req.Config.Deploy.Kubernetes.CreatesNamespace() {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("namespace %q does not exist; create it, or drop createNamespace: false so buidl creates it", t.Namespace))
 	}
 
 	desiredReplicas := replicas(req.Config)

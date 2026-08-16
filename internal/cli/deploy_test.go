@@ -70,6 +70,42 @@ func TestCheckPromoteRepositories(t *testing.T) {
 // TestPromoteRejectsEnvironmentFlag guards a silent lie: --from and --to
 // overwrite -e, so `promote -e staging --from a --to b` read as though staging
 // were involved while touching neither.
+func TestDeployDryRunFlagsExist(t *testing.T) {
+	app, _ := newTestApp(t, ui.ModePlain)
+	cmd := newDeployCmd(app)
+	for _, name := range []string{"dry-run", "detailed", "detailed-exitcode"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("deploy is missing --%s", name)
+		}
+	}
+}
+
+func TestDeployUnknownApp(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+accessories:
+  postgres: {type: postgres}
+`)
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newDeployCmd(app)
+	cmd.SetArgs([]string{"nope"})
+	cmd.SetOut(&strings.Builder{})
+	cmd.SetErr(&strings.Builder{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("unknown app must fail before cluster contact")
+	}
+	if !strings.Contains(err.Error(), `unknown app "nope"`) {
+		t.Errorf("error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "web") || !strings.Contains(err.Error(), "postgres") {
+		t.Errorf("error should list stack members, got: %v", err)
+	}
+}
+
 func TestPromoteRejectsEnvironmentFlag(t *testing.T) {
 	app, _ := newTestApp(t, ui.ModePlain)
 	app.opts.environment = "staging"

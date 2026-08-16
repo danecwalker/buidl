@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -242,11 +243,22 @@ func assertOwnedNamespace(ns *corev1.Namespace, cfg *config.Config) error {
 }
 
 func appSelector(cfg *config.Config) string {
-	return fmt.Sprintf("%s=%s,%s=%s,%s=%s",
+	return fmt.Sprintf("%s=%s,%s,%s=%s",
 		release.LabelManagedBy, release.ManagedBy,
-		release.LabelName, cfg.App,
+		processNameSelector(cfg),
 		release.LabelEnv, cfg.Environment,
 	)
+}
+
+// processNameSelector matches every process app in the stack. Accessories
+// use a different name (web-postgres) and do not match. A single-app
+// file keeps the equality selector so existing objects stay selected.
+func processNameSelector(cfg *config.Config) string {
+	names := cfg.ProcessAppNames()
+	if len(names) <= 1 {
+		return fmt.Sprintf("%s=%s", release.LabelName, cfg.App)
+	}
+	return fmt.Sprintf("%s in (%s)", release.LabelName, strings.Join(names, ","))
 }
 
 func (t *Target) waitNamespaceGone(ctx context.Context, name string) error {

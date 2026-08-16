@@ -79,6 +79,13 @@ func applyDefaults(c *Config) {
 	if c.Deploy.Kubernetes.Namespace == "" {
 		c.Deploy.Kubernetes.Namespace = c.App
 	}
+	// Same class of first-run hole as createPullSecret: init then deploy
+	// into a new cluster has no app namespace. Default on so the user
+	// never has to open buidl.yaml for that. Explicit false still wins.
+	if c.Deploy.Kubernetes.CreateNamespace == nil {
+		enabled := true
+		c.Deploy.Kubernetes.CreateNamespace = &enabled
+	}
 
 	// --- healthcheck ---
 	// Applied before scale defaults: an HTTP probe is how we decide whether to

@@ -88,7 +88,7 @@ func Resolve(ctx context.Context, ref string) (string, error) {
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 	)
 	if err != nil {
-		return "", fmt.Errorf("resolving %s in the registry: %w\n\nhint: has the image been pushed? check `buidl releases`", ref, err)
+		return "", fmt.Errorf("resolving %s in the registry: %w\n\nhint: has the image been pushed? check `buidl status --history`", ref, err)
 	}
 	return desc.Digest.String(), nil
 }

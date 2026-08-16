@@ -16,6 +16,7 @@ func newEnvironmentCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "environment",
 		Aliases:      []string{"env", "environments"},
+		Hidden:       true,
 		SilenceUsage: true,
 		Short:        "Manage deployment environments",
 		Long: `Create, list, and remove environment overlays in buidl.yaml.
@@ -109,34 +110,12 @@ when that name is not already declared.
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := strings.ToLower(args[0])
-			if !config.ValidDNSLabel(name) {
-				return fmt.Errorf("environment name %q must be a lowercase DNS label", args[0])
-			}
-
 			f, err := a.openConfigFile()
 			if err != nil {
 				return err
 			}
-			if containsString(f.EnvironmentNames(), name) {
-				return fmt.Errorf("environment %q already exists\n\nhint: `buidl environment list` shows what is declared", name)
-			}
-
-			appName := f.App()
-			if appName == "" {
-				return fmt.Errorf("%s has no `app`", a.path)
-			}
-
-			overlay, err := environmentOverlay(f, name, appName, from, host)
-			if err != nil {
+			if err := a.addEnvironment(f, name, from, host); err != nil {
 				return err
-			}
-			if err := f.Set([]string{"environments", name}, overlay); err != nil {
-				return err
-			}
-			if f.DefaultEnvironment() == "" {
-				if err := f.SetString([]string{"defaultEnvironment"}, name); err != nil {
-					return err
-				}
 			}
 			if err := f.Save(); err != nil {
 				return err
@@ -257,6 +236,35 @@ is preferred as the new default when it remains.`,
 
 	cmd.Flags().BoolVar(&force, "force", false, "allow deleting the default environment")
 	return cmd
+}
+
+// addEnvironment writes one overlay. The caller saves. First overlay becomes
+// defaultEnvironment. Used by `environment new` and by `init` when the user
+// asked for staging / review apps.
+func (a *App) addEnvironment(f *config.File, name, from, host string) error {
+	if !config.ValidDNSLabel(name) {
+		return fmt.Errorf("environment name %q must be a lowercase DNS label", name)
+	}
+	if containsString(f.EnvironmentNames(), name) {
+		return fmt.Errorf("environment %q already exists\n\nhint: `buidl environment list` shows what is declared", name)
+	}
+	appName := f.App()
+	if appName == "" {
+		return fmt.Errorf("%s has no `app`", f.Path)
+	}
+	overlay, err := environmentOverlay(f, name, appName, from, host)
+	if err != nil {
+		return err
+	}
+	if err := f.Set([]string{"environments", name}, overlay); err != nil {
+		return err
+	}
+	if f.DefaultEnvironment() == "" {
+		if err := f.SetString([]string{"defaultEnvironment"}, name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func environmentOverlay(f *config.File, name, app, from, host string) (*yaml.Node, error) {

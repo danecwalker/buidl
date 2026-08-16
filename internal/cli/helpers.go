@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/danecwalker/buidl/internal/build"
 	"github.com/danecwalker/buidl/internal/config"
@@ -520,6 +521,47 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// canPrompt reports whether init (and similar setup questions) should ask
+// interactively. Flags and non-TTY stdin skip the questions so tests and
+// scripts never hang.
+func (a *App) canPrompt(cmd *cobra.Command) bool {
+	if a.forcePrompt != nil {
+		return *a.forcePrompt
+	}
+	if a.log != nil && a.log.CI().Detected {
+		return false
+	}
+	f, ok := cmd.InOrStdin().(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
+
+// askYesNo asks a CRA-style y/n question. An empty answer, EOF, or anything
+// other than yes/no uses defaultYes. This is a setup question, not a
+// confirmation: declining is a valid choice, not a cancellation.
+func (a *App) askYesNo(cmd *cobra.Command, question string, defaultYes bool) (bool, error) {
+	hint := "[y/N]"
+	if defaultYes {
+		hint = "[Y/n]"
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "%s %s ", question, hint)
+
+	var answer string
+	if _, err := fmt.Fscanln(cmd.InOrStdin(), &answer); err != nil {
+		return defaultYes, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true, nil
+	case "n", "no":
+		return false, nil
+	default:
+		return defaultYes, nil
+	}
 }
 
 // confirm asks a yes/no question and turns anything but an explicit yes into

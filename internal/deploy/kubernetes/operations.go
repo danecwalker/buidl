@@ -40,8 +40,8 @@ func (t *Target) Preflight(ctx context.Context, req deploy.Request) error {
 	if err != nil {
 		return fmt.Errorf("checking namespace %s: %w", t.Namespace, err)
 	}
-	if !exists && !cfg.Deploy.Kubernetes.CreateNamespace {
-		return fmt.Errorf("namespace %q does not exist\n\nhint: set deploy.kubernetes.createNamespace: true, or run `kubectl create namespace %s`", t.Namespace, t.Namespace)
+	if !exists && !cfg.Deploy.Kubernetes.CreatesNamespace() {
+		return fmt.Errorf("namespace %q does not exist\n\nhint: create it with kubectl, or drop createNamespace: false so buidl creates it", t.Namespace)
 	}
 
 	// 3. Do we have permission to write what we are about to write? Failing here
@@ -597,7 +597,7 @@ func (t *Target) Releases(ctx context.Context, req deploy.Request) ([]deploy.Rel
 func (t *Target) Logs(ctx context.Context, req deploy.LogRequest) error {
 	cfg := req.Config
 
-	selector := fmt.Sprintf("%s=%s,%s=%s", release.LabelName, cfg.App, release.LabelEnv, cfg.Environment)
+	selector := fmt.Sprintf("%s,%s=%s", processNameSelector(cfg), release.LabelEnv, cfg.Environment)
 	if req.Release != "" {
 		selector = fmt.Sprintf("%s=%s", release.LabelRelease, req.Release)
 	}
@@ -611,8 +611,12 @@ func (t *Target) Logs(ctx context.Context, req deploy.LogRequest) error {
 	}
 
 	opts := &corev1.PodLogOptions{
-		Container: cfg.App,
-		Follow:    req.Follow,
+		Follow: req.Follow,
+	}
+	// Extra process apps use their own container name. An empty Container
+	// lets the API pick the only container in each pod.
+	if len(cfg.ProcessAppNames()) <= 1 {
+		opts.Container = cfg.App
 	}
 	if req.Tail >= 0 {
 		opts.TailLines = &req.Tail

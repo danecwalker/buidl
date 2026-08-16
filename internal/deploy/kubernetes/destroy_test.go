@@ -71,6 +71,78 @@ func TestDestroyRefusesUnownedNamespace(t *testing.T) {
 	}
 }
 
+func TestAppSelectorIncludesExtraProcessApps(t *testing.T) {
+	single := testConfig(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	got := appSelector(single)
+	if strings.Contains(got, " in (") {
+		t.Errorf("single-app selector should stay an equality: %s", got)
+	}
+	if !strings.Contains(got, release.LabelName+"=web") {
+		t.Errorf("single-app selector = %s", got)
+	}
+
+	stack := testConfig(t, `
+app: web
+image: ghcr.io/acme/web
+apps:
+  api:
+    image: ghcr.io/acme/api
+accessories:
+  postgres: {type: postgres}
+`)
+	got = appSelector(stack)
+	if !strings.Contains(got, "in (") || !strings.Contains(got, "api") || !strings.Contains(got, "web") {
+		t.Errorf("multi-app selector = %s", got)
+	}
+	if strings.Contains(got, "postgres") {
+		t.Errorf("selector must not include stateful apps: %s", got)
+	}
+}
+
+func TestDestroyObjectsDeletesExtraProcessApps(t *testing.T) {
+	nsName := "web-staging"
+	cfg := testConfig(t, `
+app: web
+image: ghcr.io/acme/web
+apps:
+  api:
+    image: ghcr.io/acme/api
+deploy:
+  kubernetes:
+    namespace: web-staging
+    createNamespace: true
+`)
+	cfg.Environment = "staging"
+
+	tgt := destroyTarget(cfg,
+		ownedNamespace(nsName, "web", "staging"),
+		ownedDeployment(nsName, "web", "staging"),
+		ownedDeployment(nsName, "api", "staging"),
+		ownedService(nsName, "web", "staging"),
+		accessoryStatefulSet(nsName, "web", "staging"),
+	)
+
+	out, err := tgt.Destroy(context.Background(), deploy.DestroyRequest{Config: cfg})
+	if err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if out.Mode != deploy.DestroyModeObjects {
+		t.Fatalf("Mode = %s, want objects", out.Mode)
+	}
+	if _, err := tgt.clientset.AppsV1().Deployments(nsName).Get(context.Background(), "web", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("web deployment still present: %v", err)
+	}
+	if _, err := tgt.clientset.AppsV1().Deployments(nsName).Get(context.Background(), "api", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("api deployment still present: %v", err)
+	}
+	if _, err := tgt.clientset.AppsV1().StatefulSets(nsName).Get(context.Background(), "web-postgres", metav1.GetOptions{}); err != nil {
+		t.Fatalf("accessory was deleted: %v", err)
+	}
+}
+
 func TestDestroyObjectsLeavesAccessories(t *testing.T) {
 	nsName := "web-staging"
 	cfg := testConfig(t, `

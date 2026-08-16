@@ -21,8 +21,9 @@ func wrapNames(names []string, perLine int) []string {
 // newHooksCmd lists the lifecycle hooks buidl will run.
 func newHooksCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "hooks",
-		Short: "List the lifecycle hooks buidl will run",
+		Use:    "hooks",
+		Hidden: true,
+		Short:  "List the lifecycle hooks buidl will run",
 		Long: `Show every hook point and whether an executable is present for it.
 
 Hooks are plain executables in .buidl/hooks named for the lifecycle point. They

@@ -1,8 +1,8 @@
 // Package gitinfo reads repository provenance for a deploy.
 //
-// Every release records where it came from. This is what makes `buidl releases`
-// useful during an incident: you can see which commit is live, whether it was
-// built from a dirty tree, and who shipped it.
+// Every release records where it came from. This is what makes
+// `buidl status --history` useful during an incident: you can see which
+// commit is live, whether it was built from a dirty tree, and who shipped it.
 package gitinfo
 
 import (

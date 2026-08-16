@@ -65,7 +65,7 @@ func (t *Target) Render(req deploy.Request) ([]Object, error) {
 
 	var objs []Object
 
-	if cfg.Deploy.Kubernetes.CreateNamespace {
+	if cfg.Deploy.Kubernetes.CreatesNamespace() {
 		objs = append(objs, t.namespace(cfg, rel))
 	}
 	if cfg.Deploy.Kubernetes.ServiceAccount == "" {

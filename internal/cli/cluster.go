@@ -16,8 +16,9 @@ import (
 // newClusterCmd groups the commands that turn servers into a cluster.
 func newClusterCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "cluster",
-		Short: "Create and manage the Kubernetes cluster behind an environment",
+		Use:    "cluster",
+		Hidden: true,
+		Short:  "Create and manage the Kubernetes cluster behind an environment",
 		Long: `Turn a fleet of servers into a Kubernetes cluster buidl can deploy to.
 
 buidl does not provision infrastructure. Creating machines, networks and firewalls

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
@@ -36,6 +37,44 @@ func writeKubeconfig(t *testing.T, current string, contexts ...string) {
 // alarming wrong answer buidl can give: on a machine that never ran deploy,
 // falling through to the kubeconfig's current context made `status -e production`
 // query docker-desktop and report the app as not deployed.
+func TestHiddenCommandsStayOffTheFrontDoor(t *testing.T) {
+	app, _ := newTestApp(t, ui.ModePlain)
+	hidden := []*cobra.Command{
+		newPlanCmd(app),
+		newReleasesCmd(app),
+		newAccessoryCmd(app),
+		newPromoteCmd(app),
+		newBuildCmd(app),
+		newManifestCmd(app),
+		newConfigCmd(app),
+		newHooksCmd(app),
+		newEnvironmentCmd(app),
+		newVariableCmd(app),
+		newClusterCmd(app),
+		newAddAppCmd(app),
+	}
+	for _, cmd := range hidden {
+		if !cmd.Hidden {
+			t.Errorf("%s should be hidden", cmd.Name())
+		}
+	}
+	visible := []*cobra.Command{
+		newInitCmd(app),
+		newAddCmd(app),
+		newDeployCmd(app),
+		newStatusCmd(app),
+		newLogsCmd(app),
+		newRollbackCmd(app),
+		newDestroyCmd(app),
+		newUpdateCmd(app),
+	}
+	for _, cmd := range visible {
+		if cmd.Hidden {
+			t.Errorf("%s should stay on the front door", cmd.Name())
+		}
+	}
+}
+
 func TestManagedContext(t *testing.T) {
 	tests := []struct {
 		name string

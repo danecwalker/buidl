@@ -66,6 +66,10 @@ type App struct {
 
 	skipUpdateNotice bool
 	updateResult     chan update.Result
+
+	// forcePrompt, when non-nil, overrides TTY detection so tests can drive
+	// the init wizard without a real terminal.
+	forcePrompt *bool
 }
 
 // Execute builds the command tree and runs it. It returns the process exit code.
@@ -79,19 +83,21 @@ func Execute() int {
 		Long: `buidl builds container images without a Docker daemon and deploys them as
 immutable, digest-pinned releases.
 
-Every deploy is a release you can inspect, promote, and roll back:
+One directory is one stack. Everything you run in that stack is an app.
 
-  buidl init                        detect the project and write buidl.yaml
-  buidl add server 203.0.113.10     add a machine to the fleet
-  buidl add domain example.com      add a hostname (again for api.example.com)
-  buidl add postgres                add a Postgres accessory
-  buidl deploy                      build, push, and roll out
-  buidl environment new staging     opt in to a named overlay
-  buidl plan                        show exactly what would change
-  buidl rollback                    revert to the previous release
-  buidl destroy                     tear down the app (requires -e when overlays exist)
-  buidl variable list               inspect release variables (never prints secrets)
-  buidl update                      install the latest buidl release`,
+  buidl init
+  buidl add server 203.0.113.10 --email you@example.com
+  buidl add domain example.com
+  buidl add postgres
+  buidl add api --image ghcr.io/myorg/api --host api.example.com
+  buidl deploy
+  buidl status
+  buidl logs
+  buidl rollback
+  buidl destroy
+  buidl update
+
+` + "`deploy --dry-run`" + ` prints the plan. ` + "`status --history`" + ` lists releases.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       Version,
@@ -166,8 +172,9 @@ type exitCodeError struct {
 func (e *exitCodeError) Error() string { return e.err.Error() }
 func (e *exitCodeError) Unwrap() error { return e.err }
 
-// Exit codes. 2 is reserved for "changes detected" so `buidl plan --detailed-exitcode`
-// can gate a pipeline the way terraform does.
+// Exit codes. 2 is reserved for "changes detected" so
+// `buidl deploy --dry-run --detailed-exitcode` can gate a pipeline the
+// way terraform does.
 const (
 	ExitFailure       = 1
 	ExitChangesFound  = 2

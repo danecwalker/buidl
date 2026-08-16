@@ -16,7 +16,7 @@ import (
 	"github.com/danecwalker/buidl/internal/secrets"
 )
 
-// newAddCmd writes a server, domain, database, or this app's settings into buidl.yaml.
+// newAddCmd writes a server, domain, or app into buidl.yaml.
 func newAddCmd(a *App) *cobra.Command {
 	var (
 		database string
@@ -25,34 +25,33 @@ func newAddCmd(a *App) *cobra.Command {
 		host     string
 		path     string
 		disk     string
+		image    string
+		port     int
+		command  []string
 	)
 
 	cmd := &cobra.Command{
 		Use:          "add",
 		SilenceUsage: true,
-		Short:        "Add a server, domain, database, or app to the stack",
-		Long: `Write a server, domain, database, or this app's settings into buidl.yaml.
+		Short:        "Add a server, domain, or app to the stack",
+		Long: `Grow the stack. A server is a machine. A domain is a hostname on an app.
+Everything else is an app: postgres, redis, an api, a worker.
 
   buidl add server 203.0.113.10 --email you@example.com
   buidl add domain example.com
-  buidl add domain api.example.com
   buidl add postgres
-  buidl add redis
+  buidl add api --image ghcr.io/acme/api --host api.example.com
+  buidl add worker --command ./worker
 
-A second domain is an extra hostname on this app (www, api.example.com, …).
-They share one Ingress and one certificate. A separate API service is a
-second app, which is not in this file yet.
+A second domain without --app is an extra hostname on the first app (www).
+A separate process is ` + "`buidl add api`" + `.
 
-A typed accessory is just ` + "`type: postgres`" + ` in the file. Image, port,
-volume and POSTGRES_PASSWORD are filled at load. A first ` + "`buidl deploy`" + `
-creates it if it is missing; later deploys leave it alone.`,
+Postgres and Redis are created on first deploy if they are missing. Later
+deploys leave them alone. Reconcile one with ` + "`buidl deploy postgres`" + `.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if database != "" && service {
 				return fmt.Errorf("pass --database or --service, not both")
-			}
-			if database == "" && !service {
-				return cmd.Help()
 			}
 			if len(args) == 1 && name == "" {
 				name = args[0]
@@ -66,22 +65,29 @@ creates it if it is missing; later deploys leave it alone.`,
 			if service {
 				return a.addService(f, name, host, path)
 			}
-			return a.addDatabase(f, database, name, disk)
+			if database != "" {
+				return a.addDatabase(f, database, name, disk)
+			}
+			if name != "" {
+				return a.addStackMember(f, name, host, path, image, port, command)
+			}
+			return cmd.Help()
 		},
 	}
 
 	f := cmd.Flags()
-	f.StringVar(&database, "database", "", "add a typed accessory: postgres or redis")
+	f.StringVar(&database, "database", "", "add a typed stateful app: postgres or redis")
 	f.BoolVar(&service, "service", false, "configure this app's host or health path")
-	f.StringVar(&name, "name", "", "accessory name (default: the database type)")
+	f.StringVar(&name, "name", "", "stateful app name (default: the type)")
 	f.StringVar(&host, "host", "", "proxy hostname for this app")
 	f.StringVar(&path, "path", "", "healthcheck path")
 	f.StringVar(&disk, "disk", "", "persistent volume size (e.g. 20Gi)")
+	f.StringVar(&image, "image", "", "image repository")
+	f.IntVar(&port, "port", 0, "container port")
+	f.StringSliceVar(&command, "command", nil, "container command (worker)")
 	_ = f.MarkHidden("database")
 	_ = f.MarkHidden("service")
 	_ = f.MarkHidden("name")
-	_ = f.MarkHidden("host")
-	_ = f.MarkHidden("path")
 	_ = f.MarkHidden("disk")
 
 	cmd.AddCommand(
@@ -131,31 +137,33 @@ contact and is required once a domain (TLS) is configured.`,
 }
 
 func newAddDomainCmd(a *App) *cobra.Command {
-	var email string
+	var email, appName string
 
 	cmd := &cobra.Command{
 		Use:   "domain HOST",
-		Short: "Add a hostname this app should serve",
+		Short: "Add a hostname an app should serve",
 		Long: `Write a hostname into the proxy. The first call is the primary
-host. Later calls (www, api.example.com, …) are aliases on the same app:
-one Ingress, one certificate, every name on the same Service.
+host. Later calls (www, …) are aliases on the same app: one Ingress, one
+certificate, every name on the same Service.
 
   buidl add domain example.com --email you@example.com
-  buidl add domain api.example.com
   buidl add domain www.example.com
+  buidl add domain api.example.com --app api
 
-A separate API process is a second app, not a second domain.`,
+A separate API process is ` + "`buidl add api --host api.example.com`" + `,
+not a second domain on the first app.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := a.openConfigFile()
 			if err != nil {
 				return err
 			}
-			return a.addDomain(f, args[0], email)
+			return a.addDomain(f, args[0], email, appName)
 		},
 	}
 
 	cmd.Flags().StringVar(&email, "email", "", "Let's Encrypt contact (infra.addons.certManagerEmail)")
+	cmd.Flags().StringVar(&appName, "app", "", "app that should serve this hostname (default: the first app)")
 	return cmd
 }
 
@@ -175,7 +183,7 @@ func newAddTypedDatabaseCmd(a *App, kind string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   kind,
-		Short: "Add a " + kind + " accessory",
+		Short: "Add a " + kind + " app",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := a.openConfigFile()
@@ -185,7 +193,7 @@ func newAddTypedDatabaseCmd(a *App, kind string) *cobra.Command {
 			return a.addDatabase(f, kind, name, disk)
 		},
 	}
-	cmd.Flags().StringVar(&name, "name", "", "accessory name (default: "+kind+")")
+	cmd.Flags().StringVar(&name, "name", "", "app name (default: "+kind+")")
 	cmd.Flags().StringVar(&disk, "disk", "", "persistent volume size (e.g. 20Gi)")
 	return cmd
 }
@@ -198,15 +206,12 @@ func newAddAppCmd(a *App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "app [NAME]",
-		Short: "Configure this app's host, health path, or image",
-		Long: `Configure the app already in this file.
+		Use:    "app [NAME]",
+		Short:  "Add or configure a process app",
+		Hidden: true,
+		Long: `Hidden alias of ` + "`buidl add NAME`" + `.
 
-  buidl add app --host example.com
-  buidl add app --path /up
-  buidl add app --image ghcr.io/acme/web
-
-A second named app in one stack is not supported yet.`,
+  buidl add api --image ghcr.io/acme/api --host api.example.com`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
@@ -217,7 +222,10 @@ A second named app in one stack is not supported yet.`,
 			if err != nil {
 				return err
 			}
-			return a.addApp(f, name, host, path, image)
+			if name == "" {
+				return a.addApp(f, "", host, path, image)
+			}
+			return a.addStackMember(f, name, host, path, image, 0, nil)
 		},
 	}
 	cmd.Flags().StringVar(&host, "host", "", "proxy hostname for this app")
@@ -296,13 +304,21 @@ func (a *App) addServer(f *config.File, host, user string, port int, role, email
 	return nil
 }
 
-func (a *App) addDomain(f *config.File, host, email string) error {
+func (a *App) addDomain(f *config.File, host, email, appName string) error {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return fmt.Errorf("domain is required")
 	}
 	if strings.ContainsAny(host, "/:") {
 		return fmt.Errorf("host must be a bare hostname without scheme or port (got %q)", host)
+	}
+
+	if appName != "" && appName != f.App() && containsString(f.ExtraAppNames(), appName) {
+		return a.addDomainToApp(f, appName, host, email)
+	}
+	if appName != "" && appName != f.App() {
+		return fmt.Errorf("unknown app %q (first app is %q; extra: %s)",
+			appName, f.App(), strings.Join(orDashList(f.ExtraAppNames()), ", "))
 	}
 
 	prefix := a.proxyPrefix(f)
@@ -319,7 +335,24 @@ func (a *App) addDomain(f *config.File, host, email string) error {
 		return fmt.Errorf("this stack has servers; TLS needs a Let's Encrypt contact\n\nhint: buidl add domain %s --email you@example.com", host)
 	}
 
-	if primary == "" {
+	// A first real hostname fills template overlay hosts (staging.example.com
+	// and friends) so init --staging then add domain never needs a YAML edit.
+	// A name under an existing host is an alias, even when that host is still
+	// a template (api.staging.example.com on staging.example.com).
+	replaceTemplates := isTemplateHost(primary) && !isSubdomainOrEqual(host, primary) && !hasRealProxyHost(f)
+	isPrimary := primary == "" || replaceTemplates
+	if replaceTemplates {
+		if err := syncEnvironmentHosts(f, host); err != nil {
+			return err
+		}
+		// Overlays now have derived hosts. Only write this prefix if it is
+		// still empty or a leftover template (no matching overlay).
+		if cur := f.String(append(prefix, "host")...); cur == "" || isTemplateHost(cur) {
+			if err := f.SetString(append(prefix, "host"), host); err != nil {
+				return err
+			}
+		}
+	} else if primary == "" {
 		if err := f.SetString(append(prefix, "host"), host); err != nil {
 			return err
 		}
@@ -338,12 +371,144 @@ func (a *App) addDomain(f *config.File, host, email string) error {
 		return err
 	}
 
-	if primary == "" {
+	if isPrimary {
 		a.log.Success("added domain %s", host)
 	} else {
 		a.log.Success("added alias %s (with %s)", host, primary)
 	}
 	a.log.Detail("tls on")
+	return nil
+}
+
+func orDashList(names []string) []string {
+	if len(names) == 0 {
+		return []string{"(none)"}
+	}
+	return names
+}
+
+func (a *App) addDomainToApp(f *config.File, appName, host, email string) error {
+	if err := a.setCertEmail(f, email); err != nil {
+		return err
+	}
+	prefix := []string{"apps", appName, "proxy"}
+	primary := f.String(append(prefix, "host")...)
+	aliases := f.Strings(append(prefix, "hosts")...)
+	if host == primary || containsString(aliases, host) {
+		return fmt.Errorf("domain %q is already configured on %s", host, appName)
+	}
+	if primary == "" || isTemplateHost(primary) {
+		if err := f.SetString(append(prefix, "host"), host); err != nil {
+			return err
+		}
+	} else {
+		if err := f.AppendUnique(append(prefix, "hosts"), host); err != nil {
+			return err
+		}
+	}
+	if err := f.SetBool(append(prefix, "ssl"), true); err != nil {
+		return err
+	}
+	if err := f.Save(); err != nil {
+		return err
+	}
+	if err := a.validateEditedConfig(f, ""); err != nil {
+		return err
+	}
+	if primary == "" || isTemplateHost(primary) {
+		a.log.Success("added domain %s on %s", host, appName)
+	} else {
+		a.log.Success("added alias %s on %s (with %s)", host, appName, primary)
+	}
+	return nil
+}
+
+func (a *App) addStackMember(f *config.File, name, host, path, image string, port int, command []string) error {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if config.SupportedAccessoryType(name) {
+		return a.addDatabase(f, name, "", "")
+	}
+	if name == f.App() {
+		return a.addApp(f, name, host, path, image)
+	}
+	if containsString(f.AccessoryNames(), name) {
+		return fmt.Errorf("%q is already a stateful app\n\nhint: `buidl deploy %s` reconciles it", name, name)
+	}
+	return a.addProcessApp(f, name, host, path, image, port, command)
+}
+
+func (a *App) addProcessApp(f *config.File, name, host, path, image string, port int, command []string) error {
+	if !config.ValidDNSLabel(name) {
+		return fmt.Errorf("app name %q must be a lowercase DNS label", name)
+	}
+	if host == "" && path == "" && image == "" && port == 0 && len(command) == 0 {
+		return fmt.Errorf("pass --image, --host, --port, --path, or --command to add %q", name)
+	}
+	if image != "" {
+		if err := f.SetString([]string{"apps", name, "image"}, strings.ToLower(image)); err != nil {
+			return err
+		}
+	}
+	if port != 0 {
+		if err := f.Set([]string{"apps", name, "deploy", "port"}, &yaml.Node{
+			Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(port),
+		}); err != nil {
+			return err
+		}
+	}
+	if path != "" {
+		if !strings.HasPrefix(path, "/") {
+			return fmt.Errorf("healthcheck path must start with / (got %q)", path)
+		}
+		if err := f.SetString([]string{"apps", name, "deploy", "healthcheck", "path"}, path); err != nil {
+			return err
+		}
+	}
+	if len(command) > 0 {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, c := range command {
+			seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: c})
+		}
+		if err := f.Set([]string{"apps", name, "deploy", "command"}, seq); err != nil {
+			return err
+		}
+	}
+	if host != "" {
+		if strings.ContainsAny(host, "/:") {
+			return fmt.Errorf("host must be a bare hostname without scheme or port (got %q)", host)
+		}
+		existing := f.String("apps", name, "proxy", "host")
+		if existing == "" || isTemplateHost(existing) {
+			if err := f.SetString([]string{"apps", name, "proxy", "host"}, host); err != nil {
+				return err
+			}
+		} else if existing != host {
+			if err := f.AppendUnique([]string{"apps", name, "proxy", "hosts"}, host); err != nil {
+				return err
+			}
+		}
+		if err := f.SetBool([]string{"apps", name, "proxy", "ssl"}, true); err != nil {
+			return err
+		}
+	}
+	if err := f.Save(); err != nil {
+		return err
+	}
+	if err := a.validateEditedConfig(f, ""); err != nil {
+		return err
+	}
+	a.log.Success("added app %q", name)
+	if image != "" {
+		a.log.Detail("image %s", strings.ToLower(image))
+	}
+	if host != "" {
+		a.log.Detail("host %s", host)
+	}
+	if len(command) > 0 {
+		a.log.Detail("command %s", strings.Join(command, " "))
+	}
+	a.log.Info("")
+	a.log.Info("next: buidl deploy %s", name)
 	return nil
 }
 
@@ -353,9 +518,7 @@ func (a *App) addApp(f *config.File, name, host, path, image string) error {
 		return fmt.Errorf("%s has no `app`", a.path)
 	}
 	if name != "" && name != appName {
-		return fmt.Errorf("this file already defines app %q; a second app in one stack is not supported yet\n\n"+
-			"hint: run `buidl init` in another directory for now, or configure this one:\n"+
-			"  buidl add domain %s.example.com", appName, name)
+		return a.addProcessApp(f, name, host, path, image, 0, nil)
 	}
 	if host == "" && path == "" && image == "" {
 		return fmt.Errorf("app %q is already the service in this file\n\n"+
@@ -363,7 +526,7 @@ func (a *App) addApp(f *config.File, name, host, path, image string) error {
 	}
 
 	if host != "" {
-		if err := a.addDomain(f, host, ""); err != nil {
+		if err := a.addDomain(f, host, "", ""); err != nil {
 			return err
 		}
 		// addDomain already saved and validated. Keep going for path/image
@@ -420,11 +583,11 @@ func (a *App) addDatabase(f *config.File, kind, name, disk string) error {
 		name = kind
 	}
 	if !config.ValidDNSLabel(name) {
-		return fmt.Errorf("accessory name %q must be a lowercase DNS label", name)
+		return fmt.Errorf("app name %q must be a lowercase DNS label", name)
 	}
 	if f.Lookup("accessories", name) != nil {
-		return fmt.Errorf("accessory %q already exists\n\n"+
-			"hint: `buidl accessory apply` reconciles it; this command will not update an existing one", name)
+		return fmt.Errorf("%q already exists\n\n"+
+			"hint: `buidl deploy %s` reconciles it; this command will not update an existing one", name, name)
 	}
 
 	node, err := accessoryNode(kind, disk)
@@ -458,13 +621,13 @@ func (a *App) addDatabase(f *config.File, kind, name, disk string) error {
 		return err
 	}
 
-	a.log.Success("added %s accessory %q", kind, name)
+	a.log.Success("added %s app %q", kind, name)
 	a.log.Detail("type: %s", kind)
 	if disk != "" {
 		a.log.Detail("storage: %s", disk)
 	}
 	a.log.Info("")
-	a.log.Info("next: buidl deploy   # creates the accessory if it is missing")
+	a.log.Info("next: buidl deploy   # creates the app if it is missing")
 	return nil
 }
 
@@ -524,6 +687,62 @@ func randomPassword() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// isTemplateHost reports hosts `init` / `environment new` write before the
+// user has given a real domain. Those are safe to replace.
+func isTemplateHost(h string) bool {
+	switch h {
+	case "", "example.com", "staging.example.com", "${BUIDL_SLUG}.preview.example.com":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSubdomainOrEqual(host, parent string) bool {
+	if parent == "" {
+		return false
+	}
+	return host == parent || strings.HasSuffix(host, "."+parent)
+}
+
+func hasRealProxyHost(f *config.File) bool {
+	if h := f.String("proxy", "host"); h != "" && !isTemplateHost(h) {
+		return true
+	}
+	for _, name := range f.EnvironmentNames() {
+		if h := f.String("environments", name, "proxy", "host"); h != "" && !isTemplateHost(h) {
+			return true
+		}
+	}
+	return false
+}
+
+// syncEnvironmentHosts derives staging / production / preview hostnames from
+// the app's public domain so the user never types those into the file.
+func syncEnvironmentHosts(f *config.File, domain string) error {
+	if containsString(f.EnvironmentNames(), "production") && isTemplateHost(f.String("environments", "production", "proxy", "host")) {
+		if err := f.SetString([]string{"environments", "production", "proxy", "host"}, domain); err != nil {
+			return err
+		}
+	}
+	if containsString(f.EnvironmentNames(), "staging") && isTemplateHost(f.String("environments", "staging", "proxy", "host")) {
+		if err := f.SetString([]string{"environments", "staging", "proxy", "host"}, "staging."+domain); err != nil {
+			return err
+		}
+	}
+	if containsString(f.EnvironmentNames(), "preview") && isTemplateHost(f.String("environments", "preview", "proxy", "host")) {
+		if err := f.SetString([]string{"environments", "preview", "proxy", "host"}, "${BUIDL_SLUG}.preview."+domain); err != nil {
+			return err
+		}
+	}
+	if isTemplateHost(f.String("proxy", "host")) && f.Lookup("proxy") != nil {
+		if err := f.SetString([]string{"proxy", "host"}, domain); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) proxyPrefix(f *config.File) []string {

@@ -11,6 +11,29 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- Omitted `deploy.kubernetes.createNamespace` defaults to true, so
+  `buidl init` then `buidl deploy` creates the app namespace. Set
+  `createNamespace: false` to manage the namespace yourself. `init`
+  writes the setting so the generated file shows the default.
+- `buidl init` is a setup wizard. On a terminal it asks whether you want
+  GitHub Actions, then staging, then review apps, and writes the workflow
+  and overlays. `--ci`, `--staging`, `--preview`, and `--no-ci` answer the
+  same questions without a prompt. `add domain` fills template staging /
+  production / preview hosts from the hostname you give it.
+- The CLI is a stack of apps. Default help is `init`, `add`, `deploy`,
+  `status`, `logs`, `rollback`, `destroy`, `update`. `add postgres` /
+  `add redis` / `add api` are the same verb. `deploy --dry-run` replaces
+  `plan`. `status --history` replaces `releases`. `deploy postgres`
+  reconciles a stateful app. Advanced commands stay implemented and are
+  hidden. Existing files need no migration.
+- `add NAME` writes an extra process app under `apps:` (optional; files
+  without that key are unchanged). `add domain --app` attaches a hostname
+  to that process. A stack `deploy` rolls out every process app and
+  creates missing stateful apps. Object names for extras use the app
+  key; they share the stack namespace.
+
 ## [0.3.0] — 2026-08-15
 
 ### Changed

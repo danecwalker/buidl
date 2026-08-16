@@ -25,6 +25,8 @@ func newInitCmd(a *App) *cobra.Command {
 		force    bool
 		writeCI  bool
 		noCI     bool
+		staging  bool
+		preview  bool
 		noDocker bool
 	)
 
@@ -33,12 +35,19 @@ func newInitCmd(a *App) *cobra.Command {
 		Short: "Detect the project and scaffold buidl.yaml",
 		Long: `Inspect the current directory and write a working configuration.
 
+On a terminal this is a short setup wizard: detect the stack, write the
+file, then ask whether you want GitHub Actions, a staging environment, and
+review apps. The answers are written for you. You should not need to edit
+` + "`buidl.yaml`" + `.
+
+Non-interactive runs (scripts, CI) skip the questions. Pass ` + "`--ci`" + `,
+` + "`--staging`" + `, and ` + "`--preview`" + ` to answer them on the command
+line, or ` + "`--no-ci`" + ` to skip Actions.
+
 Detection covers Go, Node, Python, Ruby, Rust and static sites. If there is no
 Dockerfile, a multi-stage one is generated for the detected stack. Common
-changes go through ` + "`buidl add server`" + `, ` + "`buidl add domain`" + `,
-` + "`buidl add postgres`" + `, and ` + "`buidl variable`" + `. Named
-environments are opt-in (` + "`buidl environment new`" + `). buidl never
-regenerates these files behind your back.`,
+changes after init go through ` + "`buidl add server`" + `, ` + "`buidl add domain`" + `,
+` + "`buidl add postgres`" + `, and ` + "`buidl variable`" + `.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// init is purely local filesystem work: no cluster, no registry, and
@@ -74,6 +83,13 @@ regenerates these files behind your back.`,
 				return err
 			}
 
+			// Ask before writing, like create-react-app: answers shape the
+			// files, and Ctrl-C leaves the directory untouched.
+			choice, err := a.resolveInitCI(cmd, writeCI, noCI, staging, preview)
+			if err != nil {
+				return err
+			}
+
 			// Dockerfile first: if this fails, no config is written that references
 			// a file that does not exist.
 			if !det.HasDockerfile && !noDocker {
@@ -101,19 +117,13 @@ regenerates these files behind your back.`,
 				return err
 			}
 
-			if writeCI {
-				if err := a.scaffoldCI(dir, force); err != nil {
-					return err
-				}
+			if err := a.applyInitCI(dir, force, choice); err != nil {
+				return err
 			}
 
 			// Validate what we just wrote, so init never leaves a broken config.
-			if _, err := config.Load(config.LoadOptions{
-				Path:   configPath,
-				Strict: true,
-				Vars:   map[string]string{"BUIDL_SLUG": "example"},
-			}); err != nil {
-				return fmt.Errorf("the generated config did not validate: %w", err)
+			if err := a.validateInitConfig(configPath); err != nil {
+				return err
 			}
 
 			a.log.EndStep()
@@ -123,7 +133,11 @@ regenerates these files behind your back.`,
 			a.log.Info("  1. buidl add server <ip> --email you@example.com")
 			a.log.Info("  2. buidl add domain <hostname>     # optional; add again for api.example.com")
 			a.log.Info("  3. buidl add postgres              # optional")
-			a.log.Info("  4. buidl deploy")
+			if choice.Staging {
+				a.log.Info("  4. buidl deploy                    # staging (the default)")
+			} else {
+				a.log.Info("  4. buidl deploy")
+			}
 			return nil
 		},
 	}
@@ -133,10 +147,11 @@ regenerates these files behind your back.`,
 	f.StringVar(&image, "image", "", "image repository (e.g. ghcr.io/acme/web)")
 	f.StringVar(&registry, "registry", "", "registry host to build the image reference from (e.g. ghcr.io/acme)")
 	f.BoolVar(&force, "force", false, "overwrite existing files")
-	f.BoolVar(&writeCI, "ci", false, "write a GitHub Actions workflow that deploys on push to main")
-	f.BoolVar(&noCI, "no-ci", false, "skip writing a CI workflow (default)")
+	f.BoolVar(&writeCI, "ci", false, "set up GitHub Actions (skip the question)")
+	f.BoolVar(&noCI, "no-ci", false, "do not set up GitHub Actions (skip the question)")
+	f.BoolVar(&staging, "staging", false, "add a staging environment and a promote-to-production workflow")
+	f.BoolVar(&preview, "preview", false, "add review apps (a preview environment per pull request)")
 	f.BoolVar(&noDocker, "no-dockerfile", false, "skip generating a Dockerfile")
-	_ = noCI // kept so existing scripts that pass --no-ci keep working
 
 	return cmd
 }
@@ -204,6 +219,10 @@ build:
 deploy:
   target: kubernetes
   port: %d
+  kubernetes:
+    # Shown because the omitted default is on. A first deploy into a
+    # new cluster has no app namespace. Set false to manage it yourself.
+    createNamespace: true
   # Replica count is omitted on purpose. HTTP apps get a HorizontalPodAutoscaler
   # sized from the fleet (or the cluster's Ready nodes). Set replicas to pin a
   # static count, or set autoscale.min / autoscale.max to take over the bounds.
@@ -416,8 +435,128 @@ func (a *App) ensureGitignore(dir string) error {
 	return nil
 }
 
-// scaffoldCI writes a GitHub Actions workflow.
-func (a *App) scaffoldCI(dir string, force bool) error {
+// resolveInitCI answers the setup-wizard questions: Actions, staging, review
+// apps. Flags are the non-interactive answers. On a TTY, unanswered questions
+// are asked. Off a TTY, unanswered means no.
+func (a *App) resolveInitCI(cmd *cobra.Command, writeCI, noCI, staging, preview bool) (initCIChoice, error) {
+	if writeCI && noCI {
+		return initCIChoice{}, fmt.Errorf("pass --ci or --no-ci, not both")
+	}
+	if noCI && (staging || preview) {
+		return initCIChoice{}, fmt.Errorf("--no-ci cannot be combined with --staging or --preview")
+	}
+
+	// Any setup flag answers the whole wizard so scripts never hang.
+	// Remaining questions are only asked when nothing was specified.
+	flagged := cmd.Flags().Changed("ci") || cmd.Flags().Changed("no-ci") ||
+		cmd.Flags().Changed("staging") || cmd.Flags().Changed("preview")
+	interactive := a.canPrompt(cmd) && !flagged
+
+	var c initCIChoice
+
+	// Preview implies the rest: review apps sit on staging and need a workflow.
+	if preview {
+		return initCIChoice{CI: true, Staging: true, Preview: true}, nil
+	}
+	if noCI {
+		return c, nil
+	}
+
+	switch {
+	case writeCI || staging:
+		c.CI = true
+	case interactive:
+		a.log.Info("")
+		yes, err := a.askYesNo(cmd, "Would you like to set up GitHub Actions?", false)
+		if err != nil {
+			return c, err
+		}
+		c.CI = yes
+	}
+	if !c.CI {
+		return c, nil
+	}
+
+	switch {
+	case staging:
+		c.Staging = true
+	case interactive:
+		yes, err := a.askYesNo(cmd, "Would you like a staging environment?", false)
+		if err != nil {
+			return c, err
+		}
+		c.Staging = yes
+	}
+	if !c.Staging {
+		return c, nil
+	}
+
+	switch {
+	case preview:
+		c.Preview = true
+	case interactive:
+		yes, err := a.askYesNo(cmd, "Would you like review apps (a preview per pull request)?", false)
+		if err != nil {
+			return c, err
+		}
+		c.Preview = yes
+	}
+	return c, nil
+}
+
+// applyInitCI writes the workflow and, when asked, the staging / production /
+// preview overlays. The user never has to open the file for this.
+func (a *App) applyInitCI(dir string, force bool, choice initCIChoice) error {
+	if !choice.CI {
+		return nil
+	}
+
+	if choice.Staging {
+		f, err := config.Open(filepath.Join(dir, "buidl.yaml"))
+		if err != nil {
+			return err
+		}
+		if err := a.addEnvironment(f, "staging", "", ""); err != nil {
+			return err
+		}
+		if err := a.addEnvironment(f, "production", "", ""); err != nil {
+			return err
+		}
+		if choice.Preview {
+			if err := a.addEnvironment(f, "preview", "", ""); err != nil {
+				return err
+			}
+		}
+		if err := f.Save(); err != nil {
+			return err
+		}
+		if err := a.validateEditedConfig(f, ""); err != nil {
+			return err
+		}
+		if choice.Preview {
+			a.log.Success("wrote staging, production, and preview environments")
+		} else {
+			a.log.Success("wrote staging and production environments")
+		}
+		a.log.Detail("default environment is staging; production is a promote")
+	}
+
+	return a.scaffoldCI(dir, force, choice)
+}
+
+func (a *App) validateInitConfig(configPath string) error {
+	f, err := config.Open(configPath)
+	if err != nil {
+		return fmt.Errorf("the generated config did not validate: %w", err)
+	}
+	if err := a.validateEditedConfig(f, ""); err != nil {
+		return fmt.Errorf("the generated config did not validate: %w", err)
+	}
+	return nil
+}
+
+// scaffoldCI writes a GitHub Actions workflow matching the setup answers.
+func (a *App) scaffoldCI(dir string, force bool, choice initCIChoice) error {
 	wfDir := filepath.Join(dir, ".github", "workflows")
 	path := filepath.Join(wfDir, "deploy.yml")
 
@@ -428,7 +567,8 @@ func (a *App) scaffoldCI(dir string, force bool) error {
 	if err := os.MkdirAll(wfDir, 0o755); err != nil {
 		return err
 	}
-	if err := writeFile(path, githubWorkflow, force); err != nil {
+	body := renderGithubWorkflow(choice.Staging, choice.Preview)
+	if err := writeFile(path, body, force); err != nil {
 		return err
 	}
 	a.log.Success("wrote .github/workflows/deploy.yml")

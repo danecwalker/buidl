@@ -9,9 +9,9 @@ buidl add domain example.com
 buidl deploy
 ```
 
-That is the happy path. One live app, blue-green updates, no staging/production split unless you opt in. `plan`, `rollback`, and `destroy` are there when you need them. Named environments are `buidl environment new`. `destroy` requires `-e` only when overlays exist.
+That is the happy path. You should not need to edit `buidl.yaml` for it — the commands write the file, and omitted settings have safe defaults. `buidl init` is a short setup wizard: it asks whether you want GitHub Actions, then staging, then review apps, and writes the workflow and overlays for you. One live app, blue-green updates, no staging/production split unless you say yes. `deploy --dry-run`, `rollback`, and `destroy` are there when you need them. `destroy` requires `-e` only when overlays exist.
 
-`plan` and `deploy` can also install k3s or RKE2 on machines you already have. Creating those machines is not buidl's job. Use OpenTofu, Terraform, Ansible, or a cloud console, then `buidl add server`.
+`deploy` can also install k3s or RKE2 on machines you already have. Creating those machines is not buidl's job. Use OpenTofu, Terraform, Ansible, or a cloud console, then `buidl add server`.
 
 ## Install
 
@@ -53,21 +53,22 @@ buidl add server 203.0.113.10 --email you@example.com
 buidl add domain example.com
 buidl add domain api.example.com   # same app, extra hostname
 buidl add postgres                 # optional
+buidl add api --image ghcr.io/myorg/api --host api.example.com
 buidl deploy
 ```
 
-`init` detects Go, Node, Python, Ruby, Rust, and static sites. If there is no Dockerfile it writes a multi-stage one. It also scaffolds `.buidl/` (secrets + hooks). Pass `--ci` to write a GitHub Actions workflow that deploys on push to main.
+`init` detects Go, Node, Python, Ruby, Rust, and static sites. If there is no Dockerfile it writes a multi-stage one. It also scaffolds `.buidl/` (secrets + hooks). On a terminal it asks about GitHub Actions, staging, and review apps. Scripts pass `--ci`, `--staging`, `--preview`, or `--no-ci` instead.
 
-A second `add domain` is an alias on this app (`www`, `api.example.com`, …): one Ingress, one certificate. A separate API process is a second app (not in one file yet) — `buidl init` in another directory for now.
+A second `add domain` is an alias on the first app (`www`, `api.example.com`, …): one Ingress, one certificate. A separate API process is `buidl add api --host api.example.com`.
 
 ## How a release works
 
 1. BuildKit builds the image and pushes it straight to the registry. Nothing is stored in a local Docker image store, so there is no separate `docker push`.
 2. The deploy pins that image by digest. A pod restart cannot pick up different bytes.
-3. `promote` ships an existing digest to another environment. It does not rebuild.
-4. Release history lives in the cluster, so `releases` and `rollback` work from any machine.
+3. A hidden `promote` ships an existing digest to another environment. It does not rebuild.
+4. Release history lives in the cluster, so `status --history` and `rollback` work from any machine.
 
-`plan` dry-runs against the API server, so the diff uses the same defaulting and admission a real apply would. `--detailed-exitcode` returns 2 when something would change (cluster or app), which is how a pipeline can require approval only when needed.
+`deploy --dry-run` dry-runs against the API server, so the diff uses the same defaulting and admission a real apply would. `--detailed-exitcode` returns 2 when something would change (cluster or app), which is how a pipeline can require approval only when needed.
 
 ## Configuration
 
@@ -78,7 +79,7 @@ app: web
 image: ghcr.io/acme/web
 ```
 
-That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, `/livez` `/readyz` `/startupz` probes, a blue-green update, a non-root pod with all capabilities dropped, a namespace named after the app, and an imagePullSecret copied from your local Docker login so the cluster can pull the image you just pushed. Set `replicas` to pin a static count. Set `deploy.strategy.type: rolling` to keep a rolling update. Preview environments stay at one replica.
+That gives you a HorizontalPodAutoscaler (CPU 70%, bounds from the fleet or a 1–4 fallback), port 8080, `/livez` `/readyz` `/startupz` probes, a blue-green update, a non-root pod with all capabilities dropped, a namespace named after the app (created on first deploy), and an imagePullSecret copied from your local Docker login so the cluster can pull the image you just pushed. Set `replicas` to pin a static count. Set `deploy.strategy.type: rolling` to keep a rolling update. Set `createNamespace: false` if you manage the namespace yourself. Preview environments stay at one replica.
 
 A more complete file:
 
@@ -253,16 +254,16 @@ registry:
 
 Push credentials come from the standard Docker config (`docker login`, `gcloud auth configure-docker`, `docker/login-action`). Set `createPullSecret: false` for a public image or when the nodes already have a `registries.yaml`.
 
-### Accessories
+### Stateful apps
 
-Databases, caches, and queues sit next to the app in the same file. The usual way to add one is a command, not an edit:
+Postgres and Redis are apps in the stack, the same as web or api. Add them with a command:
 
 ```sh
 buidl add postgres
 buidl add redis
 ```
 
-That writes `type: postgres` (or `redis`) and generates `POSTGRES_PASSWORD` plus `DATABASE_URL` into `.buidl/secrets`. Image, port, volume and mount path are filled at load. A password already in `.buidl/secrets` is enough — you do not have to list `POSTGRES_PASSWORD` under the app's `env.secret`. A first `buidl deploy` creates any accessory that is not already in the cluster. Later deploys leave existing accessories alone — including ones that have drifted — so shipping a web change cannot restart a database.
+That writes `type: postgres` (or `redis`) under `accessories` and generates `POSTGRES_PASSWORD` plus `DATABASE_URL` into `.buidl/secrets`. Image, port, volume and mount path are filled at load. A first `buidl deploy` creates any stateful app that is not already in the cluster. Later deploys leave existing ones alone — including ones that have drifted — so shipping a web change cannot restart a database. Reconcile one with `buidl deploy postgres` (it prompts before anything that restarts a pod).
 
 ```yaml
 accessories:
@@ -273,16 +274,11 @@ accessories:
 
 An explicit `image` / `storage` still wins. Untyped accessories with a full spec keep working.
 
-Each accessory becomes a StatefulSet plus a headless Service. Inside the namespace, `postgres` resolves as `<app>-postgres`. Typed (or well-known) Postgres and Redis images get exec probes so a first boot is covered by startup rather than a hair-trigger liveness restart.
+Each one becomes a StatefulSet plus a headless Service. Inside the namespace, `postgres` resolves as `<app>-postgres`. Typed (or well-known) Postgres and Redis images get exec probes so a first boot is covered by startup rather than a hair-trigger liveness restart.
 
-```sh
-buidl accessory plan       # what would change, and what that would restart
-buidl accessory apply      # reconcile; prompts before anything that restarts a pod
-```
+Images are not digest-pinned (buidl did not build them). They are never deleted: removing one from `buidl.yaml` stops managing it. You delete the StatefulSet and volume yourself.
 
-Accessory images are not digest-pinned (buidl did not build them). They are never deleted: removing one from `buidl.yaml` stops managing it. You delete the StatefulSet and volume yourself.
-
-Accessories have unit tests and render through the real Kubernetes scheme. They have not been applied to a real cluster yet. Treat the first one as an experiment.
+They have unit tests and render through the real Kubernetes scheme. They have not been applied to a real cluster yet. Treat the first one as an experiment.
 
 ### Hooks
 
@@ -326,10 +322,10 @@ infra:
     - {host: 203.0.113.11, role: worker, labels: {pool: gpu}, taints: ["gpu=true:NoSchedule"]}
 ```
 
-There is no separate "create the cluster" command. `buidl plan` inspects the servers and includes any Kubernetes install they need. If the cluster is already there, plan also fetches its kubeconfig so the application diff can run. `buidl deploy` converges the cluster, then ships the app.
+There is no separate "create the cluster" command. `buidl deploy --dry-run` inspects the servers and includes any Kubernetes install they need. If the cluster is already there, it also fetches its kubeconfig so the application diff can run. `buidl deploy` converges the cluster, then ships the app.
 
 ```sh
-buidl plan    -e production
+buidl deploy --dry-run -e production
 buidl deploy  -e production
 ```
 
@@ -413,7 +409,7 @@ buidl deploy -e vultr -f examples/hello/buidl.vultr.yaml
 
 ## Plan and deploy output
 
-`buidl plan` reports each object, the fields that change, and the runtime effect:
+`buidl deploy --dry-run` reports each object, the fields that change, and the runtime effect:
 
 ```
     environment  production
@@ -446,41 +442,35 @@ Unchanged objects are listed too. `--detailed` adds the full YAML diff. Secret c
 
 | Command | Purpose |
 |---|---|
-| `init` | detect the project, write `buidl.yaml` and Dockerfile (`--ci` for a workflow) |
+| `init` | detect the project, write `buidl.yaml` and Dockerfile; ask about CI / staging / review apps |
 | `add server` | list a machine you already have |
-| `add domain` | primary hostname; run again for `api.example.com` / `www` |
-| `add postgres` / `add redis` | typed accessory |
-| `add app` | configure this app's host, health path, or image |
-| `build` | build and push an image, print the digest |
-| `deploy` | converge the cluster if needed, then build, push, apply, wait |
-| `plan` | dry-run the cluster and the app |
-| `promote` | deploy one environment's exact digest to another |
-| `rollback` | previous release, or `--to <id>` |
+| `add domain` | hostname on an app (`--app` to pick; default = first) |
+| `add postgres` / `add redis` | stateful app |
+| `add NAME` | extra process app (`--image`, `--host`, `--port`, `--command`) |
+| `deploy [APP]` | converge the cluster if needed, then build, push, apply, wait |
+| `status [APP]` | live release, health, instances |
+| `logs [APP]` | stream logs (`-F` to follow) |
+| `rollback [APP]` | previous release, or `--to <id>` |
 | `destroy` | tear down the app (`-e` required when overlays exist) |
-| `status` | live release, health, instances |
-| `releases` | history from cluster revisions |
-| `logs` | stream logs (`-F` to follow) |
-| `manifest` | print the YAML buidl would apply |
-| `config show` / `validate` / `environments` | inspect resolved config |
-| `environment` / `env` `list` `new` `set` `delete` | opt-in environment overlays |
-| `variable` / `var` `list` `set` `delete` | inspect and set release variables |
-| `hooks` | which lifecycle hooks are enabled |
-| `accessory plan` / `apply` | reconcile databases and caches |
-| `cluster ...` | inspect or tear down a buidl-managed cluster |
+| `update` | install the latest buidl release |
+
+`deploy --dry-run` prints the plan. `status --history` lists releases. `deploy postgres` reconciles that stateful app.
+
+Also implemented, hidden from default help: `environment`, `variable`, `cluster`, `promote`, `build`, `manifest`, `config`, `hooks`, `plan`, `releases`, `accessory`, `add app`.
 
 Global flags: `-e/--env`, `-f/--config`, `-o/--output {auto,pretty,plain,json}`, `-v/--verbose`, `--no-color`, `--timeout`.
 
-Useful deploy flags: `--auto-rollback`, `--skip-cluster`, `--skip-build --digest sha256:...`, `--allow-dirty`, `--yes`.
+Useful deploy flags: `--dry-run`, `--detailed`, `--detailed-exitcode`, `--auto-rollback`, `--skip-cluster`, `--skip-build --digest sha256:...`, `--allow-dirty`, `--yes`.
 
 Useful destroy flags: `--yes`, `--dry-run`, `--stale 7d`, `--force` (production).
 
-Exit codes: `0` success, `1` failure, `2` changes detected (`plan --detailed-exitcode`), `3` invalid configuration.
+Exit codes: `0` success, `1` failure, `2` changes detected (`deploy --dry-run --detailed-exitcode`), `3` invalid configuration.
 
 ## CI
 
 Output is plain in CI, colored on a terminal, or newline-delimited JSON with `-o json`. Warnings and errors become CI annotations. A dirty working tree warns locally and fails in CI.
 
-`buidl init --ci` writes a workflow that deploys the app on every push to `main`. Preview, staging, and production jobs are not generated: add those overlays with `buidl environment new` and write the workflow when you want them.
+`buidl init` asks whether you want GitHub Actions. A yes writes a workflow that deploys the app on every push to `main`. If you also want staging, the workflow deploys staging on push and promotes that digest to production. Review apps add a preview per pull request and tear it down when the PR closes. `--ci`, `--staging`, and `--preview` answer the same questions without a prompt.
 
 ## Requirements
 
@@ -516,7 +506,7 @@ FAIL_READINESS=1 buidl deploy -e local -f examples/hello/buidl.yaml --auto-rollb
 Against two VMs you already have, after putting their addresses in the file:
 
 ```sh
-buidl plan   -e vm -f examples/hello/buidl.vm.yaml
+buidl deploy --dry-run -e vm -f examples/hello/buidl.vm.yaml
 buidl deploy -e vm -f examples/hello/buidl.vm.yaml
 ```
 

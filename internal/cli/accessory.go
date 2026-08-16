@@ -10,19 +10,14 @@ import (
 	"github.com/danecwalker/buidl/internal/deploy/kubernetes"
 )
 
-// newAccessoryCmd manages the supporting stateful services declared under
-// `accessories`.
-//
-// These live behind their own verb rather than riding along with `deploy` on
-// purpose. Reconciling a database is not something that should happen because
-// someone shipped a web app — see the comment at the top of
-// internal/deploy/kubernetes/accessories.go. The cost is that an accessory can
-// drift until someone runs this; `accessory plan` is how that drift is seen.
+// newAccessoryCmd is the hidden alias of `buidl deploy` / `deploy --dry-run`
+// for stateful apps. Reconciling a database is `buidl deploy postgres`.
 func newAccessoryCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "accessory",
 		Aliases: []string{"accessories"},
-		Short:   "Manage supporting services (databases, caches, queues)",
+		Hidden:  true,
+		Short:   "Manage supporting services (alias of deploy / deploy --dry-run)",
 		Long: `Manage the services declared under ` + "`accessories`" + ` in buidl.yaml.
 
 A first ` + "`buidl deploy`" + ` creates any accessory that is not already in the

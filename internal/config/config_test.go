@@ -57,6 +57,11 @@ func TestLoadMinimalAppliesDefaults(t *testing.T) {
 	if cfg.Deploy.Kubernetes.Namespace != "web" {
 		t.Errorf("Namespace = %q, want web (derived from app)", cfg.Deploy.Kubernetes.Namespace)
 	}
+	// A four-line file must create its namespace. Requiring a YAML edit
+	// for that is a CLI-first violation.
+	if !cfg.Deploy.Kubernetes.CreatesNamespace() {
+		t.Error("omitted createNamespace must default true so init then deploy needs no YAML edit")
+	}
 	if cfg.Registry.Server != "ghcr.io" {
 		t.Errorf("Registry.Server = %q, want ghcr.io (derived from image)", cfg.Registry.Server)
 	}
@@ -135,6 +140,22 @@ func TestRegistryFromImage(t *testing.T) {
 		if got := registryFromImage(tt.image); got != tt.want {
 			t.Errorf("registryFromImage(%q) = %q, want %q", tt.image, got, tt.want)
 		}
+	}
+}
+
+func TestCreateNamespaceExplicitFalse(t *testing.T) {
+	res, err := Load(LoadOptions{Path: write(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  kubernetes:
+    createNamespace: false
+`), Strict: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Config.Deploy.Kubernetes.CreatesNamespace() {
+		t.Error("createNamespace: false must not be overwritten by the default")
 	}
 }
 

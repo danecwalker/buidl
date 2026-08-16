@@ -155,6 +155,60 @@ func TestDeploymentUsesDigestPinnedImage(t *testing.T) {
 	}
 }
 
+func TestRenderExtraProcessApp(t *testing.T) {
+	cfg := testConfig(t, `
+app: web
+image: ghcr.io/acme/web
+deploy:
+  kubernetes:
+    namespace: web
+apps:
+  api:
+    image: ghcr.io/acme/api
+    deploy: {port: 3001}
+    proxy: {host: api.example.com, ssl: true}
+accessories:
+  postgres: {type: postgres}
+`)
+	api, err := cfg.ForProcessApp("api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := newTestTarget(api)
+	rel := testRelease()
+	rel.Repo = api.Image
+	objs, err := target.Render(deploy.Request{Config: api, Release: rel, Root: "."})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	dep := findObject(objs, "Deployment")
+	if dep == nil {
+		t.Fatal("expected Deployment")
+	}
+	d := dep.Object.(*appsv1.Deployment)
+	if d.Labels[release.LabelName] != "api" {
+		t.Errorf("deployment label name = %q", d.Labels[release.LabelName])
+	}
+	if d.Namespace != "web" {
+		t.Errorf("deployment namespace = %q, want stack namespace web", d.Namespace)
+	}
+	if !strings.Contains(d.Spec.Template.Spec.Containers[0].Image, "ghcr.io/acme/api@") {
+		t.Errorf("image = %q", d.Spec.Template.Spec.Containers[0].Image)
+	}
+	svc := findObject(objs, "Service")
+	if svc == nil || svc.Object.(*corev1.Service).Name != "api" {
+		t.Errorf("service = %v", svc)
+	}
+	ing := findObject(objs, "Ingress")
+	if ing == nil {
+		t.Fatal("expected Ingress for api host")
+	}
+	rules := ing.Object.(*networkingv1.Ingress).Spec.Rules
+	if len(rules) == 0 || rules[0].Host != "api.example.com" {
+		t.Errorf("ingress host = %v", rules)
+	}
+}
+
 func TestSelectorExcludesReleaseForRollingUpdates(t *testing.T) {
 	target, req := testRequest(t, renderBase+`
   strategy:
