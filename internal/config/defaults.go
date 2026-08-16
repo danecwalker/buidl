@@ -47,7 +47,12 @@ func applyDefaults(c *Config) {
 		c.Build.Platforms = []string{"linux/amd64"}
 	}
 	if c.Build.Cache == "" {
-		c.Build.Cache = "registry"
+		// A local image has nowhere to store a registry cache.
+		if IsLocalImage(c.Image) {
+			c.Build.Cache = "none"
+		} else {
+			c.Build.Cache = "registry"
+		}
 	}
 	if c.Build.CacheRef == "" && c.Image != "" {
 		c.Build.CacheRef = c.Image + DefaultCacheSuffix
@@ -62,11 +67,17 @@ func applyDefaults(c *Config) {
 	// The cluster cannot use the developer's docker login. Default to copying
 	// that credential in, otherwise `buidl init` then `buidl deploy` dies on
 	// ErrImagePull against GHCR (private by default). An explicit pullSecret
-	// means someone else already manages the credential.
+	// means someone else already manages the credential. A local image is
+	// copied onto the nodes, so there is nothing to pull.
 	if c.Registry.CreatePullSecret == nil && c.Registry.PullSecret == "" {
-		enabled := true
-		c.Registry.CreatePullSecret = &enabled
-		c.Registry.pullSecretDefaulted = true
+		if IsLocalImage(c.Image) {
+			off := false
+			c.Registry.CreatePullSecret = &off
+		} else {
+			enabled := true
+			c.Registry.CreatePullSecret = &enabled
+			c.Registry.pullSecretDefaulted = true
+		}
 	}
 
 	// --- deploy ---

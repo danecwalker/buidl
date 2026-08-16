@@ -11,6 +11,21 @@ do about them.
 
 ## [Unreleased]
 
+### Added
+
+- `buidl watch` is a live terminal dashboard of the stack: health, ready
+  counts, RAM, CPU, uptime, restarts, and cluster nodes. `j`/`k` select
+  an app's instances. RAM and CPU come from metrics-server (k3s bundles
+  it); without it those columns show `—`. `--once` and non-TTY stdout
+  print one snapshot. The default 30m command timeout does not apply
+  unless `--timeout` is set.
+- `buidl init` without `--registry` writes `image: buidl.local/<app>`.
+  `deploy` builds a local archive, copies it onto every `infra.servers`
+  node, imports it into containerd, deploys with `imagePullPolicy:
+  Never`, and deletes the temporary tars. A kubeconfig-only cluster
+  without SSH cannot take this path. Legacy `ghcr.io/change-me/*`
+  images still sideload.
+
 ## [0.4.1] — 2026-08-17
 
 ### Fixed

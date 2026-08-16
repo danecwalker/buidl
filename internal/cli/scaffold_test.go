@@ -216,11 +216,11 @@ func TestResolveImage(t *testing.T) {
 	if got, _ := resolveImage("", "ghcr.io/acme/", "web"); got != "ghcr.io/acme/web" {
 		t.Errorf("resolveImage = %q", got)
 	}
-	// With neither, the placeholder must be obviously a placeholder — and lowercase,
+	// With neither, deploy sideloads a local image. The host must be lowercase,
 	// since an uppercase image reference is invalid.
 	got, _ := resolveImage("", "", "web")
-	if !strings.Contains(got, "change-me") {
-		t.Errorf("resolveImage = %q, want an obvious placeholder", got)
+	if got != "buidl.local/web" {
+		t.Errorf("resolveImage = %q, want buidl.local/web", got)
 	}
 }
 
@@ -508,8 +508,8 @@ func TestInitWithoutRegistryProducesAValidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if image != strings.ToLower(image) {
-		t.Errorf("placeholder image %q must be lowercase to be a valid reference", image)
+	if image != "buidl.local/hello" {
+		t.Errorf("image = %q, want buidl.local/hello", image)
 	}
 
 	rendered := renderConfig(project.Detection{
@@ -517,12 +517,28 @@ func TestInitWithoutRegistryProducesAValidConfig(t *testing.T) {
 		Name: "hello", Port: 8080,
 	}, image)
 
-	// Exactly what init does after writing the file.
-	if _, err := config.Load(config.LoadOptions{
+	if !strings.Contains(rendered, "createPullSecret: false") {
+		t.Error("local image config must not create a pull secret")
+	}
+	if strings.Contains(rendered, "createPullSecret: true") {
+		t.Error("local image config must not enable createPullSecret")
+	}
+
+	res, err := config.Load(config.LoadOptions{
 		Path:   writeTempConfig(t, rendered),
 		Strict: true,
 		Vars:   map[string]string{"BUIDL_SLUG": "example"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("a config generated without --registry must validate: %v", err)
+	}
+	if !res.Config.LocalImage() {
+		t.Error("generated config must be treated as a local image")
+	}
+	if res.Config.Registry.ManagesPullSecret() {
+		t.Error("local image must not manage a pull secret")
+	}
+	if res.Config.Build.Cache != "none" {
+		t.Errorf("Cache = %q, want none (no registry to store it)", res.Config.Build.Cache)
 	}
 }

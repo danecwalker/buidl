@@ -141,6 +141,45 @@ func TestKubectlCommandsAreUsable(t *testing.T) {
 	}
 }
 
+func TestImportImageCommandsTargetContainerd(t *testing.T) {
+	k, _ := DistroFor(config.DistributionK3s)
+	kCmd := k.ImportImageCommand("/var/tmp/buidl-image-x.tar")
+	if !strings.Contains(kCmd, "k3s ctr images import") {
+		t.Errorf("k3s import: %s", kCmd)
+	}
+	if !strings.Contains(kCmd, "--digests") {
+		t.Errorf("k3s import should create digest refs: %s", kCmd)
+	}
+	if !strings.Contains(kCmd, "/var/tmp/buidl-image-x.tar") {
+		t.Errorf("k3s import should name the archive: %s", kCmd)
+	}
+
+	r, _ := DistroFor(config.DistributionRKE2)
+	rCmd := r.ImportImageCommand("/var/tmp/buidl-image-x.tar")
+	if !strings.Contains(rCmd, "images import") {
+		t.Errorf("rke2 import: %s", rCmd)
+	}
+	if !strings.Contains(rCmd, "-n k8s.io") {
+		t.Errorf("rke2 import must target the kubelet namespace: %s", rCmd)
+	}
+	if !strings.Contains(rCmd, "--digests") {
+		t.Errorf("rke2 import should create digest refs: %s", rCmd)
+	}
+
+	// A hostile filename must not break out of the command.
+	quoted := k.ImportImageCommand("/var/tmp/evil; rm -rf /")
+	if strings.Contains(quoted, "rm -rf /") && !strings.Contains(quoted, `'`) {
+		t.Errorf("import path must be quoted: %s", quoted)
+	}
+}
+
+func TestRemoteArchivePathStaysUnderVarTmp(t *testing.T) {
+	got := remoteArchivePath("/tmp/buidl-image-abc.tar")
+	if got != "/var/tmp/buidl-image-abc.tar" {
+		t.Errorf("remoteArchivePath = %q", got)
+	}
+}
+
 func TestUninstallCommandsDifferByRoleForK3s(t *testing.T) {
 	k, _ := DistroFor(config.DistributionK3s)
 	// k3s ships separate scripts; running the server one on an agent fails.

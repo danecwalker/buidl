@@ -350,6 +350,16 @@ func (t *Target) serviceAccountName(cfg *config.Config) string {
 	return release.ObjectName(cfg.App)
 }
 
+// imagePullPolicy is Never for a sideloaded local image (nothing to pull,
+// and IfNotPresent would still try a registry that does not exist).
+func imagePullPolicy(cfg *config.Config) corev1.PullPolicy {
+	if cfg.LocalImage() {
+		return corev1.PullNever
+	}
+	// The digest is immutable, so there is nothing to re-pull.
+	return corev1.PullIfNotPresent
+}
+
 // container renders the app container.
 func (t *Target) container(cfg *config.Config, rel release.Release) (*corev1.Container, error) {
 	env, err := t.envVars(cfg, rel)
@@ -365,9 +375,8 @@ func (t *Target) container(cfg *config.Config, rel release.Release) (*corev1.Con
 	c := &corev1.Container{
 		Name: cfg.App,
 		// Always the digest reference: a restarted pod pulls identical bytes.
-		Image: rel.Ref(),
-		// The digest is immutable, so there is nothing to re-pull.
-		ImagePullPolicy: corev1.PullIfNotPresent,
+		Image:           rel.Ref(),
+		ImagePullPolicy: imagePullPolicy(cfg),
 		Ports: []corev1.ContainerPort{{
 			Name:          "http",
 			ContainerPort: cfg.Deploy.Port,

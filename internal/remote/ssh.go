@@ -546,11 +546,17 @@ func (c *Client) run(ctx context.Context, command string, stdin io.Reader) (*Res
 // so it can contain any bytes — newlines, quotes, YAML — without escaping
 // concerns, and never appears in the process list or shell history.
 func (c *Client) WriteFile(ctx context.Context, path, content string, mode string) error {
+	return c.WriteStream(ctx, path, strings.NewReader(content), mode)
+}
+
+// WriteStream copies r to a remote path with the given mode. Use this for
+// large payloads (image archives) that must not be buffered as a string.
+func (c *Client) WriteStream(ctx context.Context, path string, r io.Reader, mode string) error {
 	dir := filepath.Dir(path)
 	command := fmt.Sprintf("mkdir -p %s && cat > %s && chmod %s %s",
 		Quote(dir), Quote(path), Quote(mode), Quote(path))
 
-	result, err := c.run(ctx, c.elevate(command), strings.NewReader(content))
+	result, err := c.run(ctx, c.elevate(command), r)
 	if err != nil {
 		return err
 	}
@@ -563,6 +569,12 @@ func (c *Client) WriteFile(ctx context.Context, path, content string, mode strin
 		}
 	}
 	return nil
+}
+
+// Remove deletes a remote path. Missing files are not an error.
+func (c *Client) Remove(ctx context.Context, path string) error {
+	_, err := c.Sudo(ctx, "rm -f "+Quote(path))
+	return err
 }
 
 // ReadFile reads a remote file.

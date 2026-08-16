@@ -18,6 +18,7 @@ import (
 
 	"github.com/danecwalker/buidl/internal/config"
 	"github.com/danecwalker/buidl/internal/inventory"
+	"github.com/danecwalker/buidl/internal/remote"
 )
 
 // Distro abstracts the differences between Kubernetes distributions.
@@ -50,6 +51,10 @@ type Distro interface {
 
 	// UninstallCommand removes the distribution from a node.
 	UninstallCommand(role inventory.Role) string
+
+	// ImportImageCommand imports a docker/OCI archive into the node's
+	// containerd store so kubelet can start pods with imagePullPolicy: Never.
+	ImportImageCommand(archivePath string) string
 }
 
 // DistroFor returns the driver for a configured distribution.
@@ -110,6 +115,12 @@ func (k3s) UninstallCommand(role inventory.Role) string {
 	return "/usr/local/bin/k3s-agent-uninstall.sh"
 }
 
+func (k3s) ImportImageCommand(archivePath string) string {
+	// k3s ctr defaults to the k8s.io namespace the kubelet reads.
+	// --digests creates the repo@sha256 ref the Deployment pins to.
+	return "k3s ctr images import --digests " + remote.Quote(archivePath)
+}
+
 // --- RKE2 ------------------------------------------------------------------
 
 // rke2 is Rancher's security-hardened distribution, with CIS-aligned defaults
@@ -154,4 +165,9 @@ func (rke2) KubectlCommand() string {
 func (rke2) UninstallCommand(inventory.Role) string {
 	// RKE2 ships a single uninstall script for both roles.
 	return "/usr/local/bin/rke2-uninstall.sh"
+}
+
+func (rke2) ImportImageCommand(archivePath string) string {
+	// RKE2 keeps containerd on the historical k3s socket path.
+	return "/var/lib/rancher/rke2/bin/ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import --digests " + remote.Quote(archivePath)
 }

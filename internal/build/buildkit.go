@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,7 +187,25 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 		platforms = req.Config.Build.Platforms
 	}
 
-	solveOpt, err := b.solveOpt(req, contextDir, dockerfilePath, platforms)
+	var archive *os.File
+	keepArchive := false
+	if req.Config.LocalImage() {
+		if len(platforms) > 1 {
+			return Result{}, fmt.Errorf("local image transfer is single-platform; got %s\n\nhint: set build.platforms to one architecture, or pass --registry to push a multi-arch image", strings.Join(platforms, ", "))
+		}
+		archive, err = os.CreateTemp("", "buidl-image-*.tar")
+		if err != nil {
+			return Result{}, fmt.Errorf("creating image archive: %w", err)
+		}
+		defer func() {
+			_ = archive.Close()
+			if !keepArchive {
+				_ = os.Remove(archive.Name())
+			}
+		}()
+	}
+
+	solveOpt, err := b.solveOpt(req, contextDir, dockerfilePath, platforms, archive)
 	if err != nil {
 		return Result{}, err
 	}
@@ -231,22 +250,27 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 	}
 
 	digest := resp.ExporterResponse[exporterDigestKey]
-	if digest == "" && req.Push {
-		return Result{}, errors.New("build succeeded but the registry returned no image digest; cannot pin this release")
+	if digest == "" && (req.Push || req.Config.LocalImage()) {
+		return Result{}, errors.New("build succeeded but produced no image digest; cannot pin this release")
 	}
 
-	return Result{
+	result := Result{
 		Digest:    digest,
 		Ref:       req.Config.Image + "@" + digest,
 		Tag:       req.Release.Tag,
 		Platforms: platforms,
 		Duration:  time.Since(start),
-		Pushed:    req.Push,
-	}, nil
+		Pushed:    req.Push && !req.Config.LocalImage(),
+	}
+	if archive != nil {
+		keepArchive = true
+		result.Archive = archive.Name()
+	}
+	return result, nil
 }
 
 // solveOpt translates buidl config into BuildKit's solve request.
-func (b *BuildKit) solveOpt(req Request, contextDir, dockerfilePath string, platforms []string) (*bkclient.SolveOpt, error) {
+func (b *BuildKit) solveOpt(req Request, contextDir, dockerfilePath string, platforms []string, archive *os.File) (*bkclient.SolveOpt, error) {
 	cfg := req.Config
 
 	frontendAttrs := map[string]string{
@@ -267,18 +291,6 @@ func (b *BuildKit) solveOpt(req Request, contextDir, dockerfilePath string, plat
 		frontendAttrs["label:"+k] = v
 	}
 
-	// Push both the immutable digest and a readable tag. The tag is a
-	// convenience; nothing in buidl resolves it after the build.
-	exportAttrs := map[string]string{
-		"name": strings.Join([]string{req.Release.TagRef(), cfg.Image + ":" + cfg.Environment}, ","),
-		"push": boolStr(req.Push),
-		// Preserve both platforms' manifests under one index for multi-arch.
-		"oci-mediatypes": "true",
-	}
-	if len(platforms) > 1 {
-		exportAttrs["annotation-index.org.opencontainers.image.created"] = req.Release.CreatedAt.UTC().Format(time.RFC3339)
-	}
-
 	attachable, err := b.sessionAttachables(req, contextDir)
 	if err != nil {
 		return nil, err
@@ -291,10 +303,7 @@ func (b *BuildKit) solveOpt(req Request, contextDir, dockerfilePath string, plat
 			"context":    contextDir,
 			"dockerfile": filepath.Dir(dockerfilePath),
 		},
-		Exports: []bkclient.ExportEntry{{
-			Type:  bkclient.ExporterImage,
-			Attrs: exportAttrs,
-		}},
+		Exports: []bkclient.ExportEntry{exportEntry(req, platforms, archive)},
 		Session: attachable,
 	}
 
@@ -305,12 +314,50 @@ func (b *BuildKit) solveOpt(req Request, contextDir, dockerfilePath string, plat
 	return opt, nil
 }
 
+// exportEntry writes a registry push, or a docker-save tar for a local image.
+func exportEntry(req Request, platforms []string, archive *os.File) bkclient.ExportEntry {
+	cfg := req.Config
+	names := strings.Join([]string{req.Release.TagRef(), cfg.Image + ":" + cfg.Environment}, ",")
+
+	if cfg.LocalImage() {
+		return bkclient.ExportEntry{
+			Type: bkclient.ExporterDocker,
+			Attrs: map[string]string{
+				"name": names,
+			},
+			Output: func(map[string]string) (io.WriteCloser, error) {
+				return archive, nil
+			},
+		}
+	}
+
+	exportAttrs := map[string]string{
+		"name": names,
+		"push": boolStr(req.Push),
+		// Preserve both platforms' manifests under one index for multi-arch.
+		"oci-mediatypes": "true",
+	}
+	if len(platforms) > 1 {
+		exportAttrs["annotation-index.org.opencontainers.image.created"] = req.Release.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	return bkclient.ExportEntry{
+		Type:  bkclient.ExporterImage,
+		Attrs: exportAttrs,
+	}
+}
+
 // cacheOpts configures the layer cache.
 //
 // Registry-backed cache is the default because it is the only kind that
 // survives an ephemeral CI runner: the cache lives next to the image, so a
 // fresh runner gets warm-cache build times.
 func (b *BuildKit) cacheOpts(cfg *buidlconfig.Config) (imports, exports []bkclient.CacheOptionsEntry) {
+	if cfg.LocalImage() {
+		// Registry cache has nowhere to live; BuildKit's local store still
+		// speeds up the next sideload build on this machine.
+		return nil, nil
+	}
+
 	switch cfg.Build.Cache {
 	case "none":
 		return nil, nil

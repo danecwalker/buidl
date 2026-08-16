@@ -3,13 +3,13 @@
 Build container images without a Docker daemon and deploy them to Kubernetes as immutable, digest-pinned releases.
 
 ```
-buidl init --registry ghcr.io/myorg
+buidl init
 buidl add server 203.0.113.10 --email you@example.com
 buidl add domain example.com
 buidl deploy
 ```
 
-That is the happy path. You should not need to edit `buidl.yaml` for it — the commands write the file, and omitted settings have safe defaults. `buidl init` is a short setup wizard: it asks whether you want GitHub Actions, then staging, then review apps, and writes the workflow and overlays for you. One live app, blue-green updates, no staging/production split unless you say yes. `deploy --dry-run`, `rollback`, and `destroy` are there when you need them. `destroy` requires `-e` only when overlays exist.
+That is the happy path. You should not need to edit `buidl.yaml` for it — the commands write the file, and omitted settings have safe defaults. `buidl init` is a short setup wizard: it asks whether you want GitHub Actions, then staging, then review apps, and writes the workflow and overlays for you. Omit `--registry` to build locally and copy the image onto your servers; pass `--registry ghcr.io/myorg` to push instead. One live app, blue-green updates, no staging/production split unless you say yes. `deploy --dry-run`, `rollback`, `watch`, and `destroy` are there when you need them. `destroy` requires `-e` only when overlays exist.
 
 `deploy` can also install k3s or RKE2 on machines you already have. Creating those machines is not buidl's job. Use OpenTofu, Terraform, Ansible, or a cloud console, then `buidl add server`.
 
@@ -48,7 +48,7 @@ Needs a kubeconfig and a BuildKit endpoint (see [Requirements](#requirements)).
 
 ```sh
 cd my-app
-buidl init --registry ghcr.io/myorg
+buidl init                         # or: buidl init --registry ghcr.io/myorg
 buidl add server 203.0.113.10 --email you@example.com
 buidl add domain example.com
 buidl add domain api.example.com   # same app, extra hostname
@@ -63,7 +63,7 @@ A second `add domain` is an alias on the first app (`www`, `api.example.com`, �
 
 ## How a release works
 
-1. BuildKit builds the image and pushes it straight to the registry. Nothing is stored in a local Docker image store, so there is no separate `docker push`.
+1. BuildKit builds the image. With a registry it pushes; with no registry, `deploy` copies a docker-save archive onto each server, imports it into containerd, and deletes the tars. Nothing is stored in a local Docker image store.
 2. The deploy pins that image by digest. A pod restart cannot pick up different bytes.
 3. A hidden `promote` ships an existing digest to another environment. It does not rebuild.
 4. Release history lives in the cluster, so `status --history` and `rollback` work from any machine.
@@ -449,6 +449,7 @@ Unchanged objects are listed too. `--detailed` adds the full YAML diff. Secret c
 | `add NAME` | extra process app (`--image`, `--host`, `--port`, `--command`) |
 | `deploy [APP]` | converge the cluster if needed, then build, push, apply, wait |
 | `status [APP]` | live release, health, instances |
+| `watch [APP]` | live dashboard: health, RAM, CPU, uptime |
 | `logs [APP]` | stream logs (`-F` to follow) |
 | `rollback [APP]` | previous release, or `--to <id>` |
 | `destroy` | tear down the app (`-e` required when overlays exist) |

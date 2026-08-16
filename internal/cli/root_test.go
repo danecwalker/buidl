@@ -63,6 +63,7 @@ func TestHiddenCommandsStayOffTheFrontDoor(t *testing.T) {
 		newAddCmd(app),
 		newDeployCmd(app),
 		newStatusCmd(app),
+		newWatchCmd(app),
 		newLogsCmd(app),
 		newRollbackCmd(app),
 		newDestroyCmd(app),

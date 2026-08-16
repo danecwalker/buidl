@@ -51,6 +51,9 @@ func pullSecretRefs(cfg *config.Config, managed bool) []corev1.LocalObjectRefere
 // actually be created. A defaulted createPullSecret with no local credential
 // is skipped so a public image and `buidl manifest` still work.
 func (t *Target) managedPullSecret(cfg *config.Config) bool {
+	if cfg.LocalImage() {
+		return false
+	}
 	if !cfg.Registry.ManagesPullSecret() {
 		return false
 	}
