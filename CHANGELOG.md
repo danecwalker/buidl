@@ -11,6 +11,8 @@ do about them.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-17
+
 ### Changed
 
 - `buidl watch` is a boxed dashboard instead of stacked tables. Stack
@@ -334,7 +336,8 @@ First tagged release.
   control plane at a time. It does **not** cordon and drain first, so pods are
   restarted rather than gracefully evicted.
 
-[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/danecwalker/buidl/releases/tag/v0.6.0
 [0.5.1]: https://github.com/danecwalker/buidl/releases/tag/v0.5.1
 [0.5.0]: https://github.com/danecwalker/buidl/releases/tag/v0.5.0
 [0.4.1]: https://github.com/danecwalker/buidl/releases/tag/v0.4.1
