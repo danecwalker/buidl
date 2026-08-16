@@ -135,7 +135,7 @@ image: ghcr.io/acme/web
 	}
 }
 
-func TestAddAppSecondNameRejected(t *testing.T) {
+func TestAddHiddenAppSubcommandWritesProcessApp(t *testing.T) {
 	path := writeTempConfig(t, `
 app: web
 image: ghcr.io/acme/web
@@ -144,13 +144,62 @@ image: ghcr.io/acme/web
 	app.opts.configPath = path
 
 	cmd := newAddCmd(app)
-	cmd.SetArgs([]string{"app", "api"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected a second named app to fail")
+	cmd.SetArgs([]string{"app", "worker", "--image", "ghcr.io/acme/web"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "not supported yet") {
-		t.Errorf("error should say this is not supported, got: %v", err)
+	res, err := config.Load(config.LoadOptions{Path: path, Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := res.Config.Apps["worker"]; !ok {
+		t.Fatalf("apps.worker missing: %#v", res.Config.Apps)
+	}
+}
+
+func TestAddProcessApp(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+`)
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newAddCmd(app)
+	cmd.SetArgs([]string{"api", "--image", "ghcr.io/acme/api", "--host", "api.example.com", "--port", "3001"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := config.Load(config.LoadOptions{Path: path, Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := res.Config.Apps["api"]
+	if !ok {
+		t.Fatalf("apps.api missing: %#v", res.Config.Apps)
+	}
+	if spec.Image != "ghcr.io/acme/api" {
+		t.Errorf("image = %q", spec.Image)
+	}
+	if spec.Deploy.Port != 3001 {
+		t.Errorf("port = %d", spec.Deploy.Port)
+	}
+	if spec.Proxy.Host != "api.example.com" {
+		t.Errorf("host = %q", spec.Proxy.Host)
+	}
+
+	cmd = newAddCmd(app)
+	cmd.SetArgs([]string{"domain", "api-admin.example.com", "--app", "api"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Strings("apps", "api", "proxy", "hosts"); len(got) != 1 || got[0] != "api-admin.example.com" {
+		t.Errorf("alias = %v", got)
 	}
 }
 
@@ -226,6 +275,67 @@ environments:
 	}
 	if len(res.Config.Proxy.Hosts) != 1 || res.Config.Proxy.Hosts[0] != "api.staging.example.com" {
 		t.Errorf("hosts = %v", res.Config.Proxy.Hosts)
+	}
+}
+
+func TestAddDomainFillsTemplateOverlayHosts(t *testing.T) {
+	path := writeTempConfig(t, `
+app: web
+image: ghcr.io/acme/web
+defaultEnvironment: staging
+environments:
+  staging:
+    proxy:
+      host: staging.example.com
+  production:
+    proxy:
+      host: example.com
+  preview:
+    proxy:
+      host: ${BUIDL_SLUG}.preview.example.com
+`)
+	app, _ := newTestApp(t, ui.ModePlain)
+	app.opts.configPath = path
+
+	cmd := newAddCmd(app)
+	cmd.SetArgs([]string{"domain", "myapp.com"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := config.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.String("environments", "production", "proxy", "host"); got != "myapp.com" {
+		t.Errorf("production host = %q, want myapp.com", got)
+	}
+	if got := f.String("environments", "staging", "proxy", "host"); got != "staging.myapp.com" {
+		t.Errorf("staging host = %q, want staging.myapp.com", got)
+	}
+	if got := f.String("environments", "preview", "proxy", "host"); got != "${BUIDL_SLUG}.preview.myapp.com" {
+		t.Errorf("preview host = %q", got)
+	}
+
+	// A later name is an alias, not another rewrite of the apex.
+	cmd = newAddCmd(app)
+	cmd.SetArgs([]string{"domain", "api.myapp.com"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	f, err = config.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.String("environments", "production", "proxy", "host"); got != "myapp.com" {
+		t.Errorf("second domain rewrote production: %q", got)
+	}
+	staging, err := config.Load(config.LoadOptions{Path: path, Environment: "staging", Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staging.Config.Proxy.Host != "staging.myapp.com" {
+		t.Errorf("staging host after alias = %q", staging.Config.Proxy.Host)
 	}
 }
 

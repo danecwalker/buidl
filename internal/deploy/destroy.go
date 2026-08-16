@@ -88,7 +88,7 @@ func DecideDestroy(cfg *config.Config, slug string) DestroyDecision {
 		}
 	}
 
-	if ephemeral(cfg, slug) && cfg.Deploy.Kubernetes.CreateNamespace {
+	if ephemeral(cfg, slug) && cfg.Deploy.Kubernetes.CreatesNamespace() {
 		return DestroyDecision{
 			Scope:  ScopeNamespace,
 			Reason: "ephemeral preview namespace",
@@ -113,7 +113,7 @@ func ephemeral(cfg *config.Config, slug string) bool {
 	// this branch/PR. The namespace must not be the app's default name —
 	// that is how a misconfigured preview: block would otherwise delete the
 	// shared app namespace.
-	if !config.PreviewLike(cfg.Environment) || !cfg.Deploy.Kubernetes.CreateNamespace {
+	if !config.PreviewLike(cfg.Environment) || !cfg.Deploy.Kubernetes.CreatesNamespace() {
 		return false
 	}
 	return namespaceLooksPreview(cfg.Deploy.Kubernetes.Namespace, cfg.App, slug)

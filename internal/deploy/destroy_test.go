@@ -23,7 +23,7 @@ func TestDecideDestroy(t *testing.T) {
 				Environment: "preview",
 				Deploy: config.Deploy{Kubernetes: config.Kubernetes{
 					Namespace:       "web-preview-pr-12",
-					CreateNamespace: true,
+					CreateNamespace: &trueVal,
 					Ephemeral:       &trueVal,
 				}},
 			},
@@ -37,7 +37,7 @@ func TestDecideDestroy(t *testing.T) {
 				Environment: "preview",
 				Deploy: config.Deploy{Kubernetes: config.Kubernetes{
 					Namespace:       "web-preview-pr-12",
-					CreateNamespace: true,
+					CreateNamespace: &trueVal,
 				}},
 			},
 			slug: "pr-12",
@@ -50,7 +50,7 @@ func TestDecideDestroy(t *testing.T) {
 				Environment: "preview",
 				Deploy: config.Deploy{Kubernetes: config.Kubernetes{
 					Namespace:       "web-preview-pr-12",
-					CreateNamespace: true,
+					CreateNamespace: &trueVal,
 					Ephemeral:       &falseVal,
 				}},
 			},
@@ -63,7 +63,7 @@ func TestDecideDestroy(t *testing.T) {
 				Environment: "preview",
 				Deploy: config.Deploy{Kubernetes: config.Kubernetes{
 					Namespace:       "web",
-					CreateNamespace: true,
+					CreateNamespace: &trueVal,
 				}},
 			},
 			want: ScopeObjects,
@@ -75,7 +75,7 @@ func TestDecideDestroy(t *testing.T) {
 				Environment: "staging",
 				Deploy: config.Deploy{Kubernetes: config.Kubernetes{
 					Namespace:       "web-staging",
-					CreateNamespace: true,
+					CreateNamespace: &trueVal,
 				}},
 			},
 			want: ScopeObjects,
@@ -98,7 +98,7 @@ func TestDecideDestroy(t *testing.T) {
 				Environment: "preview",
 				Deploy: config.Deploy{Kubernetes: config.Kubernetes{
 					Namespace:       "default",
-					CreateNamespace: true,
+					CreateNamespace: &trueVal,
 					Ephemeral:       &trueVal,
 				}},
 			},
@@ -123,7 +123,7 @@ func TestDecideDestroy(t *testing.T) {
 				Environment: "review",
 				Deploy: config.Deploy{Kubernetes: config.Kubernetes{
 					Namespace:       "web-feature-oauth",
-					CreateNamespace: true,
+					CreateNamespace: &trueVal,
 				}},
 			},
 			slug: "feature-oauth",

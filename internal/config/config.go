@@ -39,6 +39,12 @@ type Config struct {
 	Proxy       Proxy                `yaml:"proxy"`
 	Accessories map[string]Accessory `yaml:"accessories"`
 
+	// Apps are extra process apps in this stack (an api, a worker). The first
+	// process is still the top-level image/deploy/proxy so existing files do
+	// not change. Typed stateful apps (postgres, redis) stay under
+	// Accessories; the CLI calls both "apps".
+	Apps map[string]AppSpec `yaml:"apps"`
+
 	// Infra describes the machines behind the cluster and how to turn them into
 	// one. It is optional: against a managed cluster (EKS, GKE, or someone else's
 	// kubeconfig) buidl only deploys and never touches servers.
@@ -193,9 +199,13 @@ type Kubernetes struct {
 	Namespace      string            `yaml:"namespace"`
 	ServiceAccount string            `yaml:"serviceAccount"`
 	NodeSelector   map[string]string `yaml:"nodeSelector"`
-	// CreateNamespace makes `deploy` create the namespace if absent. Handy for
-	// ephemeral preview environments.
-	CreateNamespace bool `yaml:"createNamespace"`
+	// CreateNamespace makes `deploy` create the namespace if absent.
+	//
+	// A pointer so "omitted" (default on) is distinct from an explicit false.
+	// A first deploy into a new cluster has no app namespace; asking the user
+	// to add this key breaks the CLI-first rule (see CONTRIBUTING.md). Set
+	// false to manage the namespace yourself.
+	CreateNamespace *bool `yaml:"createNamespace,omitempty"`
 	// Ephemeral marks this environment as a disposable preview. `buidl destroy`
 	// deletes the whole namespace. Staging and production must never set this:
 	// their accessories and release history live in the namespace.
@@ -204,6 +214,12 @@ type Kubernetes struct {
 	// namespace is treated as ephemeral even when this is unset, so existing
 	// configs keep working. Set false to opt out.
 	Ephemeral *bool `yaml:"ephemeral,omitempty"`
+}
+
+// CreatesNamespace reports whether deploy should create the namespace if it
+// is missing. Omitted means yes. After applyDefaults the pointer is set.
+func (k Kubernetes) CreatesNamespace() bool {
+	return k.CreateNamespace == nil || *k.CreateNamespace
 }
 
 // Healthcheck drives the Kubernetes probes and the rollout gate. A release is
@@ -345,7 +361,7 @@ type Proxy struct {
 //
 // Accessories are created on first deploy if they are missing. Subsequent
 // deploys never update them, so an app rollout cannot restart a database.
-// `buidl accessory apply` is the reconcile path.
+// `buidl deploy <name>` is the reconcile path.
 type Accessory struct {
 	// Type selects a built-in accessory (`postgres`, `redis`). When set,
 	// omitted image/port/storage/env are filled at load so `type: postgres`

@@ -14,6 +14,7 @@ import (
 	"github.com/danecwalker/buidl/internal/deploy/kubernetes"
 	"github.com/danecwalker/buidl/internal/gitinfo"
 	"github.com/danecwalker/buidl/internal/hooks"
+	"github.com/danecwalker/buidl/internal/release"
 )
 
 // newBuildCmd builds and pushes an image without deploying.
@@ -29,8 +30,9 @@ func newBuildCmd(a *App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "build",
-		Short: "Build and push a container image",
+		Use:    "build",
+		Hidden: true,
+		Short:  "Build and push a container image",
 		Long: `Build the application image with BuildKit and push it to the registry.
 
 No Docker daemon is required. The image is exported straight to the registry and
@@ -87,37 +89,44 @@ to it exactly.`,
 // newDeployCmd is the main path: build, push, apply, wait.
 func newDeployCmd(a *App) *cobra.Command {
 	var (
-		skipBuild    bool
-		noWait       bool
-		autoRollback bool
-		noCache      bool
-		releaseID    string
-		digest       string
-		allowDirty   bool
-		yes          bool
-		skipCluster  bool
+		skipBuild        bool
+		noWait           bool
+		autoRollback     bool
+		noCache          bool
+		releaseID        string
+		digest           string
+		allowDirty       bool
+		yes              bool
+		skipCluster      bool
+		dryRun           bool
+		detailed         bool
+		detailedExitCode bool
 	)
 
 	cmd := &cobra.Command{
-		Use:   "deploy",
+		Use:   "deploy [APP]",
 		Short: "Converge the cluster if needed, then build and deploy a release",
 		Long: `Build the image, push it, and roll it out.
 
+With no name this deploys every process app in the stack and creates
+stateful apps (postgres, redis) that are not in the cluster yet. Later
+deploys leave existing stateful apps alone. ` + "`buidl deploy postgres`" + `
+reconciles that one (and can restart it).
+
+` + "`--dry-run`" + ` prints the plan and changes nothing.
+
 When an ` + "`infra`" + ` block is present, the cluster is brought to its configured
 state first. A fresh set of servers gets Kubernetes installed and joined; an
-existing cluster is left alone. There is no separate bootstrap command — the plan
-knows the difference, so the same command works either way.
-
-The rollout is gated on readiness (` + "`GET /readyz`" + ` by default): deploy only
-succeeds once the new release is actually serving. That makes it safe to use
-as a CI gate.
+existing cluster is left alone.
 
 Examples:
   buidl deploy
+  buidl deploy --dry-run
+  buidl deploy api
+  buidl deploy postgres --yes
   buidl deploy -e production --auto-rollback
-  buidl deploy -e production --skip-cluster
   buidl deploy -e production --skip-build --digest sha256:abc...`,
-		Args: cobra.NoArgs,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
@@ -128,6 +137,34 @@ Examples:
 			}
 			if err := a.requireEnvironment(); err != nil {
 				return err
+			}
+
+			targetApp := ""
+			if len(args) == 1 {
+				targetApp = args[0]
+			}
+			if dryRun {
+				return a.runPlan(cmd, targetApp, detailed, detailedExitCode, digest)
+			}
+
+			// Keep the stack config on a.cfg. Extra process clones change
+			// Config.App (object names); the kubeconfig context and
+			// accessory list stay on the stack.
+			stack := a.cfg
+			processCfg := stack
+			if targetApp != "" {
+				switch stack.Member(targetApp) {
+				case config.MemberNone:
+					return stack.UnknownAppError(targetApp)
+				case config.MemberStateful:
+					return a.reconcileStateful(cmd, targetApp, yes)
+				case config.MemberProcess, config.MemberPrimary:
+					one, err := stack.ForProcessApp(targetApp)
+					if err != nil {
+						return err
+					}
+					processCfg = one
+				}
 			}
 
 			// Deploying uncommitted work produces a release nobody can reproduce.
@@ -200,6 +237,7 @@ Examples:
 			}
 
 			rel := a.newRelease(releaseID)
+			rel.Repo = processCfg.Image
 			hookCtx := a.hookContext(rel, secretValues, "")
 
 			if err := a.runHook(ctx, hooks.PreBuild, hookCtx); err != nil {
@@ -220,7 +258,7 @@ Examples:
 				rel.Digest = resolved
 				a.log.Detail("resolved %s", rel.ShortDigest())
 			default:
-				rel, err = a.buildRelease(ctx, rel, true, noCache, nil)
+				rel, err = a.buildReleaseFor(ctx, processCfg, rel, true, noCache, nil)
 				if err != nil {
 					return err
 				}
@@ -239,6 +277,7 @@ Examples:
 			defer target.Close()
 
 			req := a.deployRequest(rel, secretValues, !noWait, autoRollback)
+			req.Config = processCfg
 
 			a.log.Step("Preflight checks")
 			if err := target.Preflight(ctx, req); err != nil {
@@ -247,8 +286,14 @@ Examples:
 
 			// Create accessories that are not in the cluster yet. Existing ones
 			// are left alone so a later deploy cannot restart a database.
-			if err := ensureMissingAccessories(ctx, target, req); err != nil {
-				return err
+			// A named process deploy (web, api) skips this; a named
+			// stateful deploy already returned above.
+			if targetApp == "" {
+				accReq := req
+				accReq.Config = stack
+				if err := ensureMissingAccessories(ctx, target, accReq); err != nil {
+					return err
+				}
 			}
 
 			// Migrations belong here: the image exists and the cluster is reachable,
@@ -278,6 +323,12 @@ Examples:
 			}
 
 			a.reportOutcome(outcome)
+
+			if targetApp == "" {
+				if err := a.deployExtraProcesses(ctx, target, stack, rel, secretValues, !noWait, autoRollback, skipBuild, digest, noCache); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
@@ -292,6 +343,9 @@ Examples:
 	f.BoolVar(&allowDirty, "allow-dirty", false, "allow deploying uncommitted changes")
 	f.BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")
 	f.BoolVar(&skipCluster, "skip-cluster", false, "do not inspect or change the cluster described by infra")
+	f.BoolVar(&dryRun, "dry-run", false, "print the plan and change nothing")
+	f.BoolVar(&detailed, "detailed", false, "show full object diffs (with --dry-run)")
+	f.BoolVar(&detailedExitCode, "detailed-exitcode", false, "exit 2 when --dry-run detects changes")
 
 	return cmd
 }
@@ -339,7 +393,7 @@ func isProductionLike(env string) bool {
 	return config.ProductionLike(env)
 }
 
-// newPlanCmd shows what a deploy would change.
+// newPlanCmd is the hidden alias of `buidl deploy --dry-run`.
 func newPlanCmd(a *App) *cobra.Command {
 	var (
 		detailed         bool
@@ -348,24 +402,18 @@ func newPlanCmd(a *App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "plan",
-		Short: "Show what a deploy would change, including the cluster itself",
-		Long: `Dry-run a deploy and print the resulting changes. Nothing is changed.
+		Use:    "plan [APP]",
+		Hidden: true,
+		Short:  "Show what a deploy would change (alias of deploy --dry-run)",
+		Long: `Hidden alias of ` + "`buidl deploy --dry-run`" + `. Dry-run a deploy and print
+the resulting changes. Nothing is changed.
 
 When an ` + "`infra`" + ` block is present, the servers are inspected first and any
-Kubernetes installation they need is part of the plan. That makes this the single
-place to see everything a deploy would do — bringing up a fresh fleet, joining a
-new worker, upgrading a pinned version, and the application rollout itself.
-
-If the cluster already exists, plan fetches its kubeconfig into this machine
-the same way deploy does, so the application diff can be computed without a
-separate ` + "`buidl cluster kubeconfig`" + ` step.
+Kubernetes installation they need is part of the plan.
 
 The application diff is computed by the Kubernetes API server, so it reflects the
-same defaulting and admission logic a real apply would go through. If the cluster
-does not exist yet there is nothing to diff against, and the plan reports the
-cluster work alone.`,
-		Args: cobra.NoArgs,
+same defaulting and admission logic a real apply would go through.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
@@ -374,103 +422,11 @@ cluster work alone.`,
 			if err := a.requireConfig(ctx); err != nil {
 				return err
 			}
-
-			// Cluster first: if it does not exist, the app plan cannot be computed
-			// and saying so is more useful than a connection error.
-			clusterChangesPending := false
-			addonsPending := false
-			if mgr, clusterPlan, err := a.clusterPlan(ctx); err != nil {
-				return err
-			} else if mgr != nil {
-				defer mgr.Close()
-				a.renderClusterPlan(clusterPlan, detailed)
-
-				if !clusterPlan.Actionable() {
-					return errClusterUnknown()
-				}
-				clusterChangesPending = clusterPlan.HasChanges()
-				// Tracked apart from the server changes above: a missing addon does
-				// not mean the cluster is absent, so it must not trigger the "the
-				// application plan will be available once the cluster exists"
-				// fallbacks — but it is still a change a deploy would make, so it
-				// belongs in the exit code.
-				addonsPending = len(clusterPlan.PendingAddons()) > 0
-
-				// The cluster is already there: fetch credentials if this
-				// machine does not have them yet. Plan is otherwise a dead
-				// end — it just inspected the fleet over SSH, then failed
-				// because ~/.kube/config was empty. Do not fetch when the
-				// cluster still needs installing; there is no kubeconfig
-				// yet, and the app plan falls through below.
-				if !clusterChangesPending {
-					if err := a.adoptManagedContext(cmd, mgr); err != nil {
-						return err
-					}
-				}
-				a.log.Info("")
+			targetApp := ""
+			if len(args) == 1 {
+				targetApp = args[0]
 			}
-
-			secretValues, err := a.resolveSecrets()
-			if err != nil {
-				return err
-			}
-
-			rel := a.newRelease("")
-			switch {
-			case digest != "":
-				rel.Digest = digest
-			default:
-				// Planning must not build. Resolve whatever is in the registry for
-				// this release tag; if that is absent, fall back to a placeholder so
-				// the rest of the plan is still useful.
-				if resolved, err := build.Resolve(ctx, rel.TagRef()); err == nil {
-					rel.Digest = resolved
-				} else {
-					rel.Digest = placeholderDigest
-					a.log.Warn("no image found for %s; planning with a placeholder digest", rel.TagRef())
-				}
-			}
-
-			target, err := a.target()
-			if err != nil {
-				// A missing cluster is expected when the cluster plan above has not
-				// been applied yet, and is not a planning failure.
-				if clusterChangesPending {
-					a.log.Info("the application plan will be available once the cluster exists")
-					a.log.Info("run `buidl deploy` to converge the cluster and roll out the app")
-					if detailedExitCode {
-						return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
-					}
-					return nil
-				}
-				return err
-			}
-			defer target.Close()
-
-			a.log.Step(fmt.Sprintf("Planning %s -> %s", a.cfg.App, a.cfg.Environment))
-			plan, err := target.Plan(ctx, a.deployRequest(rel, secretValues, false, false))
-			if err != nil {
-				if clusterChangesPending {
-					a.log.Info("the application plan will be available once the cluster exists")
-					a.log.Info("run `buidl deploy` to converge the cluster and roll out the app")
-					if detailedExitCode {
-						return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
-					}
-					return nil
-				}
-				return err
-			}
-
-			a.log.EndStep()
-			a.renderPlan(plan, detailed)
-
-			// Terraform-style: exit 2 signals "there are changes", which lets a
-			// pipeline require an approval step only when something would change.
-			// Cluster changes count too — they are part of what a deploy would do.
-			if detailedExitCode && (plan.HasChanges() || clusterChangesPending || addonsPending) {
-				return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
-			}
-			return nil
+			return a.runPlan(cmd, targetApp, detailed, detailedExitCode, digest)
 		},
 	}
 
@@ -496,8 +452,9 @@ func newPromoteCmd(a *App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "promote",
-		Short: "Deploy the image running in one environment to another",
+		Use:    "promote",
+		Hidden: true,
+		Short:  "Deploy the image running in one environment to another",
 		Long: `Promote the exact image digest currently live in one environment to another.
 
 Nothing is rebuilt. The bytes that were tested in staging are the bytes that run
@@ -670,17 +627,21 @@ func newRollbackCmd(a *App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "rollback",
+		Use:   "rollback [APP]",
 		Short: "Revert to a previous release",
 		Long: `Roll back to the previous release, or to a specific one.
 
 Rollback reuses the exact pod template from a prior revision, so it neither
-rebuilds nor re-resolves any tag. Run ` + "`buidl releases`" + ` to see what is available.
+rebuilds nor re-resolves any tag. Run ` + "`buidl status --history`" + ` to see what is available.
+
+With no name this rolls back every process app. ` + "`buidl rollback api`" + `
+rolls back only that app.
 
 Examples:
-  buidl rollback -e production
+  buidl rollback
+  buidl rollback api
   buidl rollback -e production --to a1b2c3d-3lk2j9`,
-		Args: cobra.NoArgs,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
@@ -702,21 +663,46 @@ Examples:
 			}
 			defer target.Close()
 
-			a.log.Step(fmt.Sprintf("Rolling back %s", a.cfg.Environment))
-			outcome, err := target.Rollback(ctx, deploy.RollbackRequest{
-				Config: a.cfg,
-				Root:   a.root,
-				To:     to,
-				Wait:   !noWait,
-			})
-			if err != nil {
-				return err
+			names := []string{a.cfg.App}
+			if len(args) == 1 {
+				cfg, err := a.processAppOrError(args[0])
+				if err != nil {
+					return err
+				}
+				names = []string{cfg.App}
+			} else {
+				names = a.cfg.ProcessAppNames()
 			}
 
-			a.log.EndStep()
-			a.log.Success("rolled back to %s in %s", outcome.Release.ID, outcome.Duration.Round(time.Second))
-			if outcome.URL != "" {
-				a.log.Info("%s", outcome.URL)
+			var last *deploy.Outcome
+			for _, name := range names {
+				cfg, err := a.cfg.ForProcessApp(name)
+				if err != nil {
+					return err
+				}
+				a.log.Step(fmt.Sprintf("Rolling back %s in %s", name, a.cfg.Environment))
+				outcome, err := target.Rollback(ctx, deploy.RollbackRequest{
+					Config: cfg,
+					Root:   a.root,
+					To:     to,
+					Wait:   !noWait,
+				})
+				if err != nil {
+					if len(names) > 1 {
+						a.log.Warn("%s: %v", name, err)
+						continue
+					}
+					return err
+				}
+				last = outcome
+				a.log.EndStep()
+				a.log.Success("rolled back %s to %s in %s", name, outcome.Release.ID, outcome.Duration.Round(time.Second))
+				if outcome.URL != "" {
+					a.log.Info("%s", outcome.URL)
+				}
+			}
+			if last == nil {
+				return fmt.Errorf("nothing to roll back in %s", a.cfg.Environment)
 			}
 			return nil
 		},
@@ -750,4 +736,315 @@ func shortDigest(d string) string {
 		hex = hex[:12]
 	}
 	return prefix + hex
+}
+
+// processAppOrError resolves a process app by name. Stateful names are
+// rejected because status / logs / rollback talk to Deployments, not
+// StatefulSets.
+func (a *App) processAppOrError(name string) (*config.Config, error) {
+	switch a.cfg.Member(name) {
+	case config.MemberNone:
+		return nil, a.cfg.UnknownAppError(name)
+	case config.MemberStateful:
+		return nil, fmt.Errorf("%q is a stateful app; reconcile it with `buidl deploy %s`", name, name)
+	default:
+		return a.cfg.ForProcessApp(name)
+	}
+}
+
+// buildReleaseFor builds using cfg's image repository without changing the
+// stack config on a.cfg (cluster context is named after the stack app).
+func (a *App) buildReleaseFor(ctx context.Context, cfg *config.Config, rel release.Release, push, noCache bool, platforms []string) (release.Release, error) {
+	prev := a.cfg
+	a.cfg = cfg
+	defer func() { a.cfg = prev }()
+	return a.buildRelease(ctx, rel, push, noCache, platforms)
+}
+
+// deployExtraProcesses rolls out every extra process app after the first
+// process. Same image as the primary reuses that digest; a different
+// repository is built (or resolved) on its own.
+func (a *App) deployExtraProcesses(ctx context.Context, target deploy.Target, stack *config.Config, primary release.Release, secretValues map[string]string, wait, autoRollback, skipBuild bool, digest string, noCache bool) error {
+	extras := stack.ProcessAppNames()
+	if len(extras) <= 1 {
+		return nil
+	}
+	for _, name := range extras[1:] {
+		cfg, err := stack.ForProcessApp(name)
+		if err != nil {
+			return err
+		}
+		rel := a.newRelease(primary.ID)
+		rel.Repo = cfg.Image
+		rel.Git = primary.Git
+		switch {
+		case cfg.Image == primary.Repo && primary.Digest != "":
+			rel.Digest = primary.Digest
+		case skipBuild:
+			a.log.Step(fmt.Sprintf("Resolving %s", rel.TagRef()))
+			resolved, err := build.Resolve(ctx, rel.TagRef())
+			if err != nil {
+				return fmt.Errorf("%s: %w\n\nhint: run `buidl build` first, or drop --skip-build", name, err)
+			}
+			rel.Digest = resolved
+		default:
+			rel, err = a.buildReleaseFor(ctx, cfg, rel, true, noCache, nil)
+			if err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+		}
+
+		secrets := secretValues
+		if extraSecrets, err := a.resolveSecretsFor(cfg); err == nil {
+			secrets = extraSecrets
+		} else {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+
+		req := a.deployRequest(rel, secrets, wait, autoRollback)
+		req.Config = cfg
+		a.log.Step(fmt.Sprintf("Preflight checks (%s)", name))
+		if err := target.Preflight(ctx, req); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		outcome, err := target.Deploy(ctx, req)
+		if err != nil {
+			a.log.FailStep(err)
+			a.reportPartialFailure(outcome)
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		a.reportOutcome(outcome)
+	}
+	return nil
+}
+
+// resolveSecretsFor loads secrets against cfg without leaving a.cfg swapped.
+func (a *App) resolveSecretsFor(cfg *config.Config) (map[string]string, error) {
+	prev := a.cfg
+	a.cfg = cfg
+	defer func() { a.cfg = prev }()
+	return a.resolveSecrets()
+}
+
+// runPlan is `deploy --dry-run` and the hidden `plan` command.
+func (a *App) runPlan(cmd *cobra.Command, targetApp string, detailed, detailedExitCode bool, digest string) error {
+	ctx := cmd.Context()
+	stack := a.cfg
+	if targetApp != "" && stack.Member(targetApp) == config.MemberNone {
+		return stack.UnknownAppError(targetApp)
+	}
+
+	clusterChangesPending := false
+	addonsPending := false
+	if mgr, clusterPlan, err := a.clusterPlan(ctx); err != nil {
+		return err
+	} else if mgr != nil {
+		defer mgr.Close()
+		a.renderClusterPlan(clusterPlan, detailed)
+
+		if !clusterPlan.Actionable() {
+			return errClusterUnknown()
+		}
+		clusterChangesPending = clusterPlan.HasChanges()
+		// Tracked apart from the server changes above: a missing addon does
+		// not mean the cluster is absent, so it must not trigger the "the
+		// application plan will be available once the cluster exists"
+		// fallbacks — but it is still a change a deploy would make, so it
+		// belongs in the exit code.
+		addonsPending = len(clusterPlan.PendingAddons()) > 0
+
+		if !clusterChangesPending {
+			if err := a.adoptManagedContext(cmd, mgr); err != nil {
+				return err
+			}
+		}
+		a.log.Info("")
+	}
+
+	if stack.Member(targetApp) == config.MemberStateful {
+		return a.planStateful(cmd, targetApp, detailed, detailedExitCode, clusterChangesPending || addonsPending)
+	}
+
+	secretValues, err := a.resolveSecrets()
+	if err != nil {
+		return err
+	}
+
+	target, err := a.target()
+	if err != nil {
+		if clusterChangesPending {
+			a.log.Info("the application plan will be available once the cluster exists")
+			a.log.Info("run `buidl deploy` to converge the cluster and roll out the app")
+			if detailedExitCode {
+				return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
+			}
+			return nil
+		}
+		return err
+	}
+	defer target.Close()
+
+	names := stack.ProcessAppNames()
+	if targetApp != "" {
+		names = []string{targetApp}
+	}
+
+	resolved := map[string]string{}
+	anyChanges := clusterChangesPending || addonsPending
+	for _, name := range names {
+		proc, err := stack.ForProcessApp(name)
+		if err != nil {
+			return err
+		}
+		rel := a.newRelease("")
+		rel.Repo = proc.Image
+		switch {
+		case digest != "":
+			rel.Digest = digest
+		default:
+			if d, ok := resolved[proc.Image]; ok {
+				rel.Digest = d
+			} else if got, err := build.Resolve(ctx, rel.TagRef()); err == nil {
+				rel.Digest = got
+				resolved[proc.Image] = got
+			} else {
+				rel.Digest = placeholderDigest
+				resolved[proc.Image] = placeholderDigest
+				a.log.Warn("no image found for %s; planning with a placeholder digest", rel.TagRef())
+			}
+		}
+
+		a.log.Step(fmt.Sprintf("Planning %s -> %s", name, a.cfg.Environment))
+		req := a.deployRequest(rel, secretValues, false, false)
+		req.Config = proc
+		plan, err := target.Plan(ctx, req)
+		if err != nil {
+			if clusterChangesPending {
+				a.log.Info("the application plan will be available once the cluster exists")
+				a.log.Info("run `buidl deploy` to converge the cluster and roll out the app")
+				if detailedExitCode {
+					return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
+				}
+				return nil
+			}
+			return err
+		}
+		a.log.EndStep()
+		a.renderPlan(plan, detailed)
+		if plan.HasChanges() {
+			anyChanges = true
+		}
+	}
+
+	if targetApp == "" && len(stack.Accessories) > 0 {
+		if err := a.planMissingAccessories(cmd, target, detailed, &anyChanges); err != nil {
+			return err
+		}
+	}
+
+	if detailedExitCode && anyChanges {
+		return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
+	}
+	return nil
+}
+
+// planMissingAccessories shows only creates: a stack dry-run must not
+// imply that deploy would update an existing database.
+func (a *App) planMissingAccessories(cmd *cobra.Command, target deploy.Target, detailed bool, anyChanges *bool) error {
+	kt, ok := target.(*kubernetes.Target)
+	if !ok {
+		return nil
+	}
+	secretValues, err := a.resolveSecrets()
+	if err != nil {
+		return err
+	}
+	req := a.deployRequest(a.newRelease(""), secretValues, false, false)
+	plan, err := kt.PlanAccessories(cmd.Context(), req)
+	if err != nil {
+		return err
+	}
+	var creates []deploy.Change
+	for _, c := range plan.Changes {
+		if c.Action == deploy.ActionCreate {
+			creates = append(creates, c)
+		}
+	}
+	if len(creates) == 0 {
+		a.log.Detail("stateful apps already present; left alone")
+		return nil
+	}
+	plan.Changes = creates
+	a.renderAccessoryPlan(plan, detailed)
+	*anyChanges = true
+	return nil
+}
+
+// planStateful dry-runs one typed accessory (deploy --dry-run postgres).
+func (a *App) planStateful(cmd *cobra.Command, name string, detailed, detailedExitCode, clusterPending bool) error {
+	filtered, err := a.cfg.ForStatefulApp(name)
+	if err != nil {
+		return err
+	}
+	prev := a.cfg
+	a.cfg = filtered
+	defer func() { a.cfg = prev }()
+
+	target, req, err := a.accessoryRequest(cmd)
+	if err != nil {
+		return err
+	}
+	defer target.Close()
+
+	plan, err := target.PlanAccessories(cmd.Context(), req)
+	if err != nil {
+		return err
+	}
+	a.renderAccessoryPlan(plan, detailed)
+	if detailedExitCode && (plan.HasChanges() || clusterPending) {
+		return &exitCodeError{code: ExitChangesFound, err: fmt.Errorf("changes detected")}
+	}
+	return nil
+}
+
+// reconcileStateful is `buidl deploy postgres`: the old accessory apply.
+func (a *App) reconcileStateful(cmd *cobra.Command, name string, yes bool) error {
+	filtered, err := a.cfg.ForStatefulApp(name)
+	if err != nil {
+		return err
+	}
+	prev := a.cfg
+	a.cfg = filtered
+	defer func() { a.cfg = prev }()
+
+	target, req, err := a.accessoryRequest(cmd)
+	if err != nil {
+		return err
+	}
+	defer target.Close()
+
+	plan, err := target.PlanAccessories(cmd.Context(), req)
+	if err != nil {
+		return err
+	}
+	a.renderAccessoryPlan(plan, false)
+
+	if err := a.confirmAccessoryApply(cmd, plan, yes); err != nil {
+		return err
+	}
+
+	changes, err := target.ApplyAccessories(cmd.Context(), req)
+	if err != nil {
+		return err
+	}
+	if len(changes) == 0 {
+		a.log.Success("no changes for %s", name)
+		return nil
+	}
+
+	a.log.EndStep()
+	a.log.Success("applied %d object(s) for %s", len(changes), name)
+	a.log.Detail("watch it come up with `kubectl rollout status statefulset -n %s -l app.kubernetes.io/component=accessory`",
+		a.cfg.Deploy.Kubernetes.Namespace)
+	return nil
 }

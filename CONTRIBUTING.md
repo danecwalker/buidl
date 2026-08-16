@@ -29,6 +29,28 @@ make acceptance
 `CRASH_ON_BOOT=1`, `BOOT_DELAY=25s` — because the happy path is the easy part
 and the failure reporting is what needs proving.
 
+## Product rules
+
+**Users do not edit `buidl.yaml` unless they are doing something advanced.**
+
+The happy path is commands: `init`, `add server`, `add domain`, `add postgres`,
+`add api`, `deploy`. Those commands write the file. A first-run deploy that dies telling
+the user to add a key is a bug in the default or in the command that should
+have written it.
+
+`init` is a setup wizard. If something must be chosen (CI, staging, review
+apps), ask on a terminal or take a flag. Do not leave the user to paste a
+workflow or an `environments` block.
+
+- Prefer a safe omitted default (`createPullSecret`, `createNamespace`,
+  `strategy: bluegreen`) over a preflight hint that says "edit the YAML".
+- If a setting must be chosen, add a flag to `init` / `add` / `variable` that
+  writes it.
+- `init` may write the resolved default so the generated file shows what will
+  happen. That is the CLI writing the file, not the user.
+- Errors may mention a key as an advanced override. They must not make
+  opening `buidl.yaml` the only way through the happy path.
+
 ## House style
 
 **Comments explain why, not what.** A comment that restates its code is worse
@@ -54,8 +76,8 @@ next step is half-finished. Where there is a known fix, print it:
 
 ```go
 return fmt.Errorf("namespace %q does not exist\n\n"+
-    "hint: set deploy.kubernetes.createNamespace: true, or run `kubectl create namespace %s`",
-    ns, ns)
+    "hint: create it with kubectl, or drop createNamespace: false so buidl creates it",
+    ns)
 ```
 
 **Tests say what they guard against.** Each non-obvious assertion carries a

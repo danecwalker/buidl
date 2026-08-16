@@ -15,6 +15,17 @@ import (
 // deploy target first, so it failed on any machine without a kubeconfig — and on
 // one with the wrong kubeconfig it failed for a reason that had nothing to do
 // with the output it was asked for.
+func TestStatusHistoryFlagExists(t *testing.T) {
+	app, _ := newTestApp(t, ui.ModePlain)
+	cmd := newStatusCmd(app)
+	if cmd.Flags().Lookup("history") == nil {
+		t.Fatal("status is missing --history")
+	}
+	if !newReleasesCmd(app).Hidden {
+		t.Error("releases should be hidden")
+	}
+}
+
 func TestManifestNeedsNoClusterCredentials(t *testing.T) {
 	path := writeTempConfig(t, `
 app: web

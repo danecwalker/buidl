@@ -90,6 +90,11 @@ func (f *File) AccessoryNames() []string {
 	return f.Keys("accessories")
 }
 
+// ExtraAppNames returns the keys of `apps`, in file order.
+func (f *File) ExtraAppNames() []string {
+	return f.Keys("apps")
+}
+
 // Lookup returns the node at path, or nil.
 func (f *File) Lookup(path ...string) *yaml.Node {
 	n := f.root()

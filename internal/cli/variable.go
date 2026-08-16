@@ -17,6 +17,7 @@ func newVariableCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "variable",
 		Aliases: []string{"var", "vars", "variables"},
+		Hidden:  true,
 		Short:   "Inspect and set the variables a release will run with",
 		Long: `Show the configuration a release will receive, and where each value comes from.
 

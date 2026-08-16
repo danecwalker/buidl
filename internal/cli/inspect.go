@@ -13,15 +13,28 @@ import (
 
 // newStatusCmd reports what is currently live.
 func newStatusCmd(a *App) *cobra.Command {
+	var history bool
+
 	cmd := &cobra.Command{
-		Use:   "status",
+		Use:   "status [APP]",
 		Short: "Show what is currently deployed",
 		Long: `Report the live release, its health, and its instances.
 
 This is the first command to run during an incident: it answers what is running,
-which commit it came from, who deployed it, and which instances are unhealthy.`,
-		Args: cobra.NoArgs,
+which commit it came from, who deployed it, and which instances are unhealthy.
+
+With no name this reports every process app. ` + "`--history`" + ` lists
+releases (the hidden ` + "`buidl releases`" + ` command).`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+			if history {
+				return a.runReleases(cmd, name)
+			}
+
 			ctx, cancel := a.context()
 			defer cancel()
 			cmd.SetContext(ctx)
@@ -39,15 +52,49 @@ which commit it came from, who deployed it, and which instances are unhealthy.`,
 			}
 			defer target.Close()
 
-			st, err := target.Status(ctx, deploy.Request{Config: a.cfg, Root: a.root})
-			if err != nil {
-				return err
+			names := a.cfg.ProcessAppNames()
+			if name != "" {
+				cfg, err := a.processAppOrError(name)
+				if err != nil {
+					return err
+				}
+				names = []string{cfg.App}
 			}
 
-			a.renderStatus(st)
+			shown := 0
+			var firstErr error
+			for _, n := range names {
+				cfg, err := a.cfg.ForProcessApp(n)
+				if err != nil {
+					return err
+				}
+				if len(names) > 1 {
+					a.log.Info("app %s", n)
+				}
+				st, err := target.Status(ctx, deploy.Request{Config: cfg, Root: a.root})
+				if err != nil {
+					a.log.Warn("%s", err)
+					if firstErr == nil {
+						firstErr = err
+					}
+					continue
+				}
+				a.renderStatus(st)
+				shown++
+				if len(names) > 1 {
+					a.log.Info("")
+				}
+			}
+			if shown == 0 {
+				if firstErr != nil {
+					return firstErr
+				}
+				return fmt.Errorf("no process apps are deployed to %s", a.cfg.Environment)
+			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&history, "history", false, "list deploy history")
 	return cmd
 }
 
@@ -156,70 +203,86 @@ func (a *App) renderStatus(st *deploy.Status) {
 	}
 }
 
-// newReleasesCmd lists deploy history.
+// newReleasesCmd is the hidden alias of `buidl status --history`.
 func newReleasesCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "releases",
+		Use:     "releases [APP]",
 		Aliases: []string{"history"},
-		Short:   "List deploy history",
-		Long: `List the releases available in this environment, newest first.
+		Hidden:  true,
+		Short:   "List deploy history (alias of status --history)",
+		Long: `Hidden alias of ` + "`buidl status --history`" + `.
 
-History is read from the cluster's own revision records, so it is accurate even
-for deploys made from another machine or another CI run. Any listed release can
-be passed to ` + "`buidl rollback --to`" + `.`,
-		Args: cobra.NoArgs,
+List the releases available in this environment, newest first. Any listed
+release can be passed to ` + "`buidl rollback --to`" + `.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := a.context()
-			defer cancel()
-			cmd.SetContext(ctx)
-
-			if err := a.requireConfig(ctx); err != nil {
-				return err
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
 			}
-			if err := a.ensureClusterCredentials(cmd); err != nil {
-				return err
-			}
-
-			target, err := a.target()
-			if err != nil {
-				return err
-			}
-			defer target.Close()
-
-			releases, err := target.Releases(ctx, deploy.Request{Config: a.cfg, Root: a.root})
-			if err != nil {
-				return err
-			}
-			if len(releases) == 0 {
-				a.log.Info("no releases found for %s", a.cfg.Environment)
-				return nil
-			}
-
-			rows := make([][]string, 0, len(releases))
-			for _, r := range releases {
-				live := ""
-				if r.Live {
-					live = "*"
-				}
-				age := ""
-				if !r.CreatedAt.IsZero() {
-					age = humanAge(time.Since(r.CreatedAt))
-				}
-				rows = append(rows, []string{
-					live,
-					r.ID,
-					fmt.Sprintf("%d", r.Revision),
-					shortSHA(r.GitSHA),
-					truncate(r.GitBranch, 20),
-					orDash(r.DeployedBy),
-					age,
-				})
-			}
-			a.log.Table([]string{"", "release", "rev", "commit", "branch", "by", "age"}, rows)
-			return nil
+			return a.runReleases(cmd, name)
 		},
 	}
 	return cmd
+}
+
+func (a *App) runReleases(cmd *cobra.Command, name string) error {
+	ctx, cancel := a.context()
+	defer cancel()
+	cmd.SetContext(ctx)
+
+	if err := a.requireConfig(ctx); err != nil {
+		return err
+	}
+	if err := a.ensureClusterCredentials(cmd); err != nil {
+		return err
+	}
+
+	target, err := a.target()
+	if err != nil {
+		return err
+	}
+	defer target.Close()
+
+	cfg := a.cfg
+	if name != "" {
+		cfg, err = a.processAppOrError(name)
+		if err != nil {
+			return err
+		}
+	}
+
+	releases, err := target.Releases(ctx, deploy.Request{Config: cfg, Root: a.root})
+	if err != nil {
+		return err
+	}
+	if len(releases) == 0 {
+		a.log.Info("no releases found for %s", cfg.App)
+		return nil
+	}
+
+	rows := make([][]string, 0, len(releases))
+	for _, r := range releases {
+		live := ""
+		if r.Live {
+			live = "*"
+		}
+		age := ""
+		if !r.CreatedAt.IsZero() {
+			age = humanAge(time.Since(r.CreatedAt))
+		}
+		rows = append(rows, []string{
+			live,
+			r.ID,
+			fmt.Sprintf("%d", r.Revision),
+			shortSHA(r.GitSHA),
+			truncate(r.GitBranch, 20),
+			orDash(r.DeployedBy),
+			age,
+		})
+	}
+	a.log.Table([]string{"", "release", "rev", "commit", "branch", "by", "age"}, rows)
+	return nil
 }
 
 // newLogsCmd streams application logs.
@@ -232,13 +295,14 @@ func newLogsCmd(a *App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "logs",
+		Use:   "logs [APP]",
 		Short: "Stream application logs",
 		Long: `Stream logs from every instance of the live release.
 
 Lines from multiple instances are interleaved and prefixed with the instance they
-came from.`,
-		Args: cobra.NoArgs,
+came from. With no name this includes every process app. ` + "`buidl logs api`" + `
+streams only that app.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := a.context()
 			defer cancel()
@@ -257,8 +321,16 @@ came from.`,
 			}
 			defer target.Close()
 
+			cfg := a.cfg
+			if len(args) == 1 {
+				cfg, err = a.processAppOrError(args[0])
+				if err != nil {
+					return err
+				}
+			}
+
 			return target.Logs(ctx, deploy.LogRequest{
-				Config:  a.cfg,
+				Config:  cfg,
 				Follow:  follow,
 				Tail:    tail,
 				Since:   since,
@@ -281,8 +353,9 @@ func newManifestCmd(a *App) *cobra.Command {
 	var digest string
 
 	cmd := &cobra.Command{
-		Use:   "manifest",
-		Short: "Print the Kubernetes manifests buidl would apply",
+		Use:    "manifest",
+		Hidden: true,
+		Short:  "Print the Kubernetes manifests buidl would apply",
 		Long: `Render the manifests for an environment and print them as YAML.
 
 Use this to review what buidl generates, to commit the output for a GitOps
@@ -338,8 +411,9 @@ workflow, or to hand it to another tool:
 // newConfigCmd inspects the resolved configuration.
 func newConfigCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "Inspect the resolved configuration",
+		Use:    "config",
+		Hidden: true,
+		Short:  "Inspect the resolved configuration",
 	}
 
 	show := &cobra.Command{

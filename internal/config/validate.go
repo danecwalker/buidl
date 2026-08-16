@@ -193,6 +193,37 @@ func Validate(c *Config) error {
 		add("`proxy.ssl` is set but the proxy is disabled")
 	}
 
+	// --- extra process apps ---
+	for name, spec := range c.Apps {
+		prefix := "apps." + name
+		if !dnsLabel.MatchString(name) {
+			add("%s: app name must be a valid DNS label", prefix)
+		}
+		if name == c.App {
+			add("%s: name %q is already the stack app", prefix, name)
+		}
+		if _, clash := c.Accessories[name]; clash {
+			add("%s: name %q is already a stateful app under accessories", prefix, name)
+		}
+		if spec.Image != "" {
+			validateImageRef(spec.Image, func(format string, args ...any) {
+				add("%s: %s", prefix, fmt.Sprintf(format, args...))
+			})
+		}
+		if spec.Deploy.Port != 0 && (spec.Deploy.Port < 1 || spec.Deploy.Port > 65535) {
+			add("%s.deploy.port must be between 1 and 65535 (got %d)", prefix, spec.Deploy.Port)
+		}
+		if spec.Proxy.Host != "" && strings.ContainsAny(spec.Proxy.Host, "/:") {
+			add("%s.proxy.host must be a bare hostname without scheme or port (got %q)", prefix, spec.Proxy.Host)
+		}
+		for _, h := range spec.Proxy.Hosts {
+			if h != "" && strings.ContainsAny(h, "/:") {
+				add("%s.proxy.hosts entry %q must be a bare hostname", prefix, h)
+			}
+		}
+		validateEnv(prefix+".env", spec.Env, add)
+	}
+
 	// --- accessories ---
 	for name, acc := range c.Accessories {
 		prefix := "accessories." + name

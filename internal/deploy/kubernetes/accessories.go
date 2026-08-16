@@ -23,11 +23,11 @@ import (
 // that live alongside the app.
 //
 // They are rendered here and nowhere else. ApplyAccessories is the full
-// reconcile and is only invoked by `buidl accessory apply`. Deploy calls
-// EnsureMissingAccessories, which creates objects that are absent and never
-// updates ones that already exist. That split is the whole feature: a first
-// `buidl deploy` can stand up Postgres, and a later deploy cannot restart it
-// because someone changed a log level.
+// reconcile and is only invoked by `buidl deploy postgres` (or the hidden
+// `accessory apply`). Deploy calls EnsureMissingAccessories, which creates
+// objects that are absent and never updates ones that already exist. That
+// split is the whole feature: a first `buidl deploy` can stand up Postgres,
+// and a later deploy cannot restart it because someone changed a log level.
 //
 // Folding accessories into Render would make "reconcile the database" the
 // default rather than a decision, and the failure mode — a Postgres pod cycled
@@ -138,7 +138,7 @@ func (t *Target) ApplyAccessories(ctx context.Context, req deploy.Request) ([]de
 
 // EnsureMissingAccessories creates accessory objects that are not in the
 // cluster. Existing objects are left untouched, even when they have drifted
-// from buidl.yaml — updating them is `buidl accessory apply`.
+// from buidl.yaml — updating them is `buidl deploy <name>`.
 func (t *Target) EnsureMissingAccessories(ctx context.Context, req deploy.Request) error {
 	if len(req.Config.Accessories) == 0 {
 		return nil
@@ -147,7 +147,7 @@ func (t *Target) EnsureMissingAccessories(ctx context.Context, req deploy.Reques
 	// Accessories live in the app namespace. On a first deploy that namespace
 	// does not exist yet — Render would create it later, which is too late
 	// for the StatefulSet apply below.
-	if req.Config.Deploy.Kubernetes.CreateNamespace {
+	if req.Config.Deploy.Kubernetes.CreatesNamespace() {
 		ns := t.namespace(req.Config, req.Release)
 		live, err := t.get(ctx, ns)
 		if err != nil {
