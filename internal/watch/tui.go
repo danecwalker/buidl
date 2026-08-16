@@ -111,6 +111,7 @@ func Live(ctx context.Context, opts Options) error {
 
 	var (
 		snap     Snapshot
+		hist     History
 		lastErr  string
 		selected int
 		have     bool
@@ -121,6 +122,7 @@ func Live(ctx context.Context, opts Options) error {
 		w, h := termSize(opts.StdoutFD)
 		v := View{
 			Snapshot:    snap,
+			History:     hist,
 			Selected:    selected,
 			Interval:    opts.Interval,
 			Now:         time.Now(),
@@ -147,6 +149,7 @@ func Live(ctx context.Context, opts Options) error {
 			} else {
 				lastErr = ""
 				snap = res.snap
+				hist.Record(snap)
 				if !have {
 					selected = snap.SelectIndex(name)
 					have = true
