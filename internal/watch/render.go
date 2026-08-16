@@ -21,6 +21,7 @@ const (
 // View is one frame of the dashboard, interactive or a single print.
 type View struct {
 	Snapshot    Snapshot
+	History     History
 	Selected    int
 	Interval    time.Duration
 	Now         time.Time
@@ -45,51 +46,82 @@ func Render(v View) string {
 	var lines []string
 	lines = append(lines, v.header()...)
 	if v.Snapshot.Time.IsZero() && v.Err == "" && len(v.Snapshot.Apps) == 0 {
-		lines = append(lines, v.paint("  loading…", attrDim))
+		lines = append(lines, v.box(v.paint("buidl watch", attrBold, attrCyan), []string{
+			v.paint("  loading…", attrDim),
+		}, v.Width, attrCyan)...)
 		lines = append(lines, v.footer()...)
 		return strings.Join(clipLines(lines, v.Width), "\n")
 	}
 	if v.Err != "" {
-		lines = append(lines, v.paint("  "+oneLine(v.Err), attrRed))
-		lines = append(lines, "")
+		lines = append(lines, v.box("error", []string{"  " + oneLine(v.Err)}, v.Width, attrRed)...)
 	}
 	if alerts := v.Snapshot.Alerts; len(alerts) > 0 {
-		lines = append(lines, v.paint("ALERTS", attrBold))
+		body := make([]string, 0, len(alerts))
 		for _, a := range alerts {
 			code := attrYellow
 			if a.Level == "crit" {
 				code = attrRed
 			}
-			lines = append(lines, "  "+v.paint(a.Text, code))
+			body = append(body, "  "+v.paint(a.Text, code))
 		}
-		lines = append(lines, "")
+		border := attrYellow
+		for _, a := range alerts {
+			if a.Level == "crit" {
+				border = attrRed
+				break
+			}
+		}
+		lines = append(lines, v.box("alerts", body, v.Width, border)...)
 	}
 
-	lines = append(lines, v.appsTable()...)
-	lines = append(lines, "")
-	lines = append(lines, v.instancesTable()...)
-	lines = append(lines, "")
-	cluster := v.clusterTable()
+	var top []string
+	if len(v.Snapshot.Nodes) > 0 && v.Width >= 72 {
+		lw := v.Width / 2
+		rw := v.Width - lw - 1
+		sb := v.stackBody(lw)
+		cb := v.clusterBody(rw)
+		for len(sb) < len(cb) {
+			sb = append(sb, "")
+		}
+		for len(cb) < len(sb) {
+			cb = append(cb, "")
+		}
+		top = zipCols(v.box("stack", sb, lw, attrCyan), v.box("cluster", cb, rw, attrBlue), lw, rw)
+	} else {
+		top = append(top, v.stackCard()...)
+		if c := v.clusterCard(); len(c) > 0 {
+			top = append(top, c...)
+		}
+	}
+
+	apps := v.appCards()
 	footer := v.footer()
 
 	if v.Height > 0 {
-		// Footer stays pinned. Cluster is the first thing to drop when the
-		// terminal is short — the apps and their instances are why you opened this.
 		reserved := len(footer) + 1
 		room := v.Height - reserved
 		if room < 8 {
 			room = 8
 		}
-		if len(lines)+len(cluster) > room {
-			cluster = nil
+		used := len(lines)
+		if used+len(top)+len(apps) > room && len(v.Snapshot.Nodes) > 0 && v.Width >= 72 {
+			// Side-by-side cluster is the first thing to drop; apps stay.
+			top = v.stackCard()
 		}
+		if used+len(top)+len(apps) > room {
+			apps = v.compactAppCards()
+		}
+		lines = append(lines, top...)
+		if len(lines)+len(apps) > room {
+			apps = trimLines(apps, room-len(lines))
+		}
+		lines = append(lines, apps...)
 		if len(lines) > room {
 			lines = lines[:room]
 		}
-	}
-	lines = append(lines, cluster...)
-	if len(cluster) > 0 {
-		lines = append(lines, "")
+	} else {
+		lines = append(lines, top...)
+		lines = append(lines, apps...)
 	}
 	lines = append(lines, footer...)
 	return strings.Join(clipLines(lines, v.Width), "\n")
@@ -107,7 +139,11 @@ func (v View) header() []string {
 
 	left := v.paint(title, attrBold, attrCyan) + "  " + v.paint(meta, attrDim)
 	right := v.paint(strings.TrimSpace(ago+"  "+metrics), attrDim)
-	return []string{fitRow(left, right, v.Width, v.Color), ""}
+	row := fitRow(left, right, v.Width, v.Color)
+	if ago != "" && !strings.Contains(stripANSI(row), "updated") {
+		return []string{left, v.paint(strings.TrimSpace(ago+"  "+metrics), attrDim)}
+	}
+	return []string{row}
 }
 
 func metricsLine(s Snapshot) string {
@@ -128,170 +164,254 @@ func metricsLine(s Snapshot) string {
 	}
 }
 
-func (v View) appsTable() []string {
-	apps := v.Snapshot.Apps
-	if len(apps) == 0 {
-		return []string{v.paint("APPS", attrBold), "  (none)"}
-	}
-	mark := make([]string, len(apps))
-	names := make([]string, len(apps))
-	types := make([]string, len(apps))
-	healths := make([]string, len(apps))
-	readys := make([]string, len(apps))
-	cpus := make([]string, len(apps))
-	rams := make([]string, len(apps))
-	uptimes := make([]string, len(apps))
-	restarts := make([]string, len(apps))
-	releases := make([]string, len(apps))
-	for i, app := range apps {
-		mark[i] = " "
-		if v.Interactive && i == v.Selected {
-			mark[i] = "▸"
-		}
-		names[i] = app.Name
-		types[i] = orDash(app.Type)
-		healths[i] = app.Health
-		readys[i] = FormatReady(app.Ready, app.Desired)
-		cpus[i] = FormatCPU(app.Usage)
-		rams[i] = FormatMemory(app.Usage)
-		uptimes[i] = FormatUptime(app.StartedAt, app.Uptime)
-		restarts[i] = fmt.Sprintf("%d", app.Restarts)
-		releases[i] = orDash(app.Release)
-	}
-	// Drop type/release/restarts/cpu before RAM and uptime — those two are
-	// why this command exists.
-	return v.table("APPS", []column{
-		{header: "", cells: mark},
-		{header: "app", cells: names},
-		{header: "type", cells: types, drop: 4},
-		{header: "health", cells: healths},
-		{header: "ready", cells: readys},
-		{header: "cpu", cells: cpus, drop: 1},
-		{header: "ram", cells: rams},
-		{header: "uptime", cells: uptimes},
-		{header: "restarts", cells: restarts, drop: 2},
-		{header: "release", cells: releases, drop: 3},
-	}, func(row int, header, cell string) string {
-		if row < 0 || row >= len(apps) {
-			return cell
-		}
-		if header == "health" {
-			return v.paint(cell, healthAttr(apps[row].Health))
-		}
-		if v.Interactive && row == v.Selected {
-			return v.paint(cell, attrCyan)
-		}
-		return cell
-	})
+func (v View) stackCard() []string {
+	return v.box("stack", v.stackBody(v.Width), v.Width, attrCyan)
 }
 
-func (v View) instancesTable() []string {
-	app := v.Snapshot.Selected(v.Selected)
-	title := "INSTANCES"
-	if app.Name != "" {
-		title += "  " + app.Name
+func (v View) stackBody(width int) []string {
+	s := v.Snapshot
+	var healthy, degraded, missing, ready, desired int32
+	var uptime time.Duration
+	var started time.Time
+	var cpu, mem Usage
+	for _, app := range s.Apps {
+		ready += app.Ready
+		desired += app.Desired
+		cpu = AddUsage(cpu, app.Usage)
+		mem = AddUsage(mem, app.Usage)
+		switch app.Health {
+		case HealthHealthy:
+			healthy++
+		case HealthDegraded:
+			degraded++
+		case HealthMissing:
+			missing++
+		}
+		if !app.StartedAt.IsZero() && (started.IsZero() || app.StartedAt.Before(started)) {
+			started = app.StartedAt
+			uptime = app.Uptime
+		}
 	}
-	if app.URL != "" {
-		title += "  " + app.URL
+	status := fmt.Sprintf("%s %d healthy", v.dot(HealthHealthy), healthy)
+	if degraded > 0 {
+		status += "  " + fmt.Sprintf("%s %d degraded", v.dot(HealthDegraded), degraded)
 	}
+	if missing > 0 {
+		status += "  " + fmt.Sprintf("%s %d missing", v.dot(HealthMissing), missing)
+	}
+	sparkW := sparkRoom(width, 14) // " CPU  " + 6-wide value + "  "
+	return []string{
+		" " + status,
+		fmt.Sprintf(" %d apps   %s ready   up %s", len(s.Apps), FormatReady(ready, desired), FormatUptime(started, uptime)),
+		" CPU  " + padVisible(FormatCPU(cpu), 6) + "  " + v.paint(sparkline(v.History.stackCPU(), sparkW), attrCyan),
+		" RAM  " + padVisible(FormatMemory(mem), 6) + "  " + v.paint(sparkline(v.History.stackMem(), sparkW), attrMagenta),
+	}
+}
+
+func (v View) clusterCard() []string {
+	body := v.clusterBody(v.Width)
+	if body == nil {
+		return nil
+	}
+	return v.box("cluster", body, v.Width, attrBlue)
+}
+
+func (v View) clusterBody(width int) []string {
+	nodes := v.Snapshot.Nodes
+	if len(nodes) == 0 {
+		return nil
+	}
+	body := make([]string, 0, len(nodes)*3)
+	// " CPU  " + 10-wide value + " " + bar + "  " + spark
+	barW, sparkW := splitGauge(width, 17)
+	for _, n := range nodes {
+		ready := "yes"
+		if !n.Ready {
+			ready = "no"
+		}
+		if !n.Schedulable {
+			ready += ", unschedulable"
+		}
+		label := n.Name
+		if n.Roles != "" {
+			label += "  " + n.Roles
+		}
+		cpuFrac := barFrac(n.Usage.CPUMilli, n.CPUAlloc)
+		memFrac := barFrac(n.Usage.Memory, n.MemAlloc)
+		body = append(body, " "+label+"  "+ready+"  "+FormatAge(n.Age))
+		cpuLine := " CPU  " + padVisible(FormatNodeCPU(n), 10) + " " + v.paint(bar(cpuFrac, barW), barAttr(cpuFrac))
+		memLine := " RAM  " + padVisible(FormatNodeMemory(n), 10) + " " + v.paint(bar(memFrac, barW), barAttr(memFrac))
+		if n.Usage.Known && sparkW > 0 {
+			cpuLine += "  " + v.paint(sparkline(v.History.nodeCPU(n.Name), sparkW), attrCyan)
+			memLine += "  " + v.paint(sparkline(v.History.nodeMem(n.Name), sparkW), attrMagenta)
+		}
+		body = append(body, cpuLine, memLine)
+		if n.Message != "" && !n.Ready {
+			body = append(body, v.paint("  "+oneLine(n.Message), attrDim))
+		}
+	}
+	return body
+}
+
+func (v View) appCards() []string {
+	var out []string
+	for i, app := range v.Snapshot.Apps {
+		out = append(out, v.appCard(app, i == v.Selected, false)...)
+	}
+	return out
+}
+
+func (v View) compactAppCards() []string {
+	var out []string
+	for i, app := range v.Snapshot.Apps {
+		out = append(out, v.appCard(app, i == v.Selected, true)...)
+	}
+	return out
+}
+
+func (v View) appCard(app App, selected, compact bool) []string {
+	mark := " "
+	if v.Interactive && selected {
+		mark = "▸"
+	}
+	title := strings.TrimSpace(mark + " " + app.Name)
+	if app.Type != "" {
+		title += "  " + v.paint(app.Type, attrDim)
+	}
+	title += "  " + v.dot(app.Health) + " " + v.paint(app.Health, healthAttr(app.Health))
+	title += "  " + FormatReady(app.Ready, app.Desired)
+	if app.Release != "" {
+		title += "  " + v.paint(app.Release, attrDim)
+	}
+	if !app.StartedAt.IsZero() {
+		title += "  up " + FormatUptime(app.StartedAt, app.Uptime)
+	}
+
+	sparkW := sparkRoom(v.Width, 14) // " CPU  " + 6-wide value + "  "
+	cpu := " CPU  " + padVisible(FormatCPU(app.Usage), 6) + "  " + v.paint(sparkline(v.History.appCPU(app.Name), sparkW), attrCyan)
+	ram := " RAM  " + padVisible(FormatMemory(app.Usage), 6) + "  " + v.paint(sparkline(v.History.appMem(app.Name), sparkW), attrMagenta)
+	body := []string{cpu, ram}
+
+	if !compact && selected {
+		if app.URL != "" {
+			body = append(body, v.paint(" "+app.URL, attrDim))
+		}
+		body = append(body, v.instanceLines(app, v.Width-4)...)
+		if app.Restarts > 0 {
+			body = append(body, v.paint(fmt.Sprintf(" restarts %d", app.Restarts), attrYellow))
+		}
+	}
+
+	border := attrDim
+	if selected && v.Interactive {
+		border = attrCyan
+	}
+	if app.Health == HealthDegraded {
+		border = attrRed
+	}
+	return v.box(title, body, v.Width, border)
+}
+
+func (v View) instanceLines(app App, width int) []string {
 	if len(app.Instances) == 0 {
 		msg := "  (none)"
 		if app.Health == HealthMissing {
 			msg = "  not deployed"
 		}
-		return []string{v.paint(title, attrBold), msg}
+		return []string{v.paint(msg, attrDim)}
 	}
-	n := len(app.Instances)
-	names := make([]string, n)
-	phases := make([]string, n)
-	readys := make([]string, n)
-	cpus := make([]string, n)
-	rams := make([]string, n)
-	uptimes := make([]string, n)
-	restarts := make([]string, n)
-	nodes := make([]string, n)
+	// name | phase | ready | ram | up | node — drop from the right on a squeeze.
+	type row struct {
+		name, phase, ready, ram, up, node string
+	}
+	rows := make([]row, len(app.Instances))
 	for i, inst := range app.Instances {
-		names[i] = inst.Name
-		phases[i] = orDash(inst.Phase)
+		ready := "no"
 		if inst.Ready {
-			readys[i] = "yes"
-		} else {
-			readys[i] = "no"
+			ready = "yes"
 		}
-		cpus[i] = FormatCPU(inst.Usage)
-		rams[i] = FormatMemory(inst.Usage)
-		uptimes[i] = FormatUptime(inst.StartedAt, inst.Uptime)
-		restarts[i] = fmt.Sprintf("%d", inst.Restarts)
-		nodes[i] = orDash(inst.Node)
+		rows[i] = row{
+			name:  inst.Name,
+			phase: orDash(inst.Phase),
+			ready: ready,
+			ram:   FormatMemory(inst.Usage),
+			up:    FormatUptime(inst.StartedAt, inst.Uptime),
+			node:  orDash(inst.Node),
+		}
 	}
-	out := v.table(title, []column{
-		{header: "instance", cells: names},
-		{header: "phase", cells: phases, drop: 1},
-		{header: "ready", cells: readys},
-		{header: "cpu", cells: cpus, drop: 2},
-		{header: "ram", cells: rams},
-		{header: "uptime", cells: uptimes},
-		{header: "restarts", cells: restarts, drop: 3},
-		{header: "node", cells: nodes, drop: 4},
-	}, func(row int, header, cell string) string {
-		if row < 0 || row >= n {
-			return cell
+	cols := []struct {
+		head  string
+		width int
+		drop  bool
+		cell  func(row) string
+	}{
+		{"instance", 0, false, func(r row) string { return r.name }},
+		{"phase", 0, true, func(r row) string { return r.phase }},
+		{"ready", 0, false, func(r row) string { return r.ready }},
+		{"ram", 0, false, func(r row) string { return r.ram }},
+		{"up", 0, false, func(r row) string { return r.up }},
+		{"node", 0, true, func(r row) string { return r.node }},
+	}
+	for i := range cols {
+		w := utf8.RuneCountInString(cols[i].head)
+		for _, r := range rows {
+			if n := utf8.RuneCountInString(cols[i].cell(r)); n > w {
+				w = n
+			}
 		}
-		if !app.Instances[row].Ready {
-			return v.paint(cell, attrYellow)
+		cols[i].width = w
+	}
+	total := func() int {
+		n := 0
+		for _, c := range cols {
+			n += c.width + 2
 		}
-		return cell
-	})
-	for _, inst := range app.Instances {
-		if inst.Message != "" && !inst.Ready {
-			out = append(out, v.paint("  "+inst.Name+": "+oneLine(inst.Message), attrDim))
+		return n
+	}
+	for total() > width {
+		dropped := false
+		for i := len(cols) - 1; i >= 0; i-- {
+			if cols[i].drop {
+				cols = append(cols[:i], cols[i+1:]...)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			// Shrink the name column.
+			over := total() - width
+			if cols[0].width-over < 8 {
+				cols[0].width = 8
+			} else {
+				cols[0].width -= over
+			}
+			break
+		}
+	}
+	head := make([]string, len(cols))
+	for i, c := range cols {
+		head[i] = padCell(c.head, c.width)
+	}
+	out := []string{v.paint(" "+strings.Join(head, "  "), attrDim)}
+	for i, r := range rows {
+		cells := make([]string, len(cols))
+		for j, c := range cols {
+			val := c.cell(r)
+			if j == 0 {
+				val = truncateRunes(val, c.width)
+			}
+			cells[j] = padCell(val, c.width)
+		}
+		line := " " + strings.Join(cells, "  ")
+		if !app.Instances[i].Ready {
+			line = v.paint(line, attrYellow)
+		}
+		out = append(out, line)
+		if msg := app.Instances[i].Message; msg != "" && !app.Instances[i].Ready {
+			out = append(out, v.paint("  "+app.Instances[i].Name+": "+oneLine(msg), attrDim))
 		}
 	}
 	return out
-}
-
-func (v View) clusterTable() []string {
-	if len(v.Snapshot.Nodes) == 0 {
-		return nil
-	}
-	nodes := v.Snapshot.Nodes
-	n := len(nodes)
-	names := make([]string, n)
-	readys := make([]string, n)
-	cpus := make([]string, n)
-	rams := make([]string, n)
-	uptimes := make([]string, n)
-	roles := make([]string, n)
-	for i, node := range nodes {
-		names[i] = node.Name
-		readys[i] = "no"
-		if node.Ready {
-			readys[i] = "yes"
-		}
-		if !node.Schedulable {
-			readys[i] += ", unschedulable"
-		}
-		cpus[i] = FormatNodeCPU(node)
-		rams[i] = FormatNodeMemory(node)
-		uptimes[i] = FormatAge(node.Age)
-		roles[i] = orDash(node.Roles)
-	}
-	return v.table("CLUSTER", []column{
-		{header: "node", cells: names},
-		{header: "ready", cells: readys},
-		{header: "cpu", cells: cpus},
-		{header: "ram", cells: rams},
-		{header: "uptime", cells: uptimes},
-		{header: "roles", cells: roles, drop: 1},
-	}, func(row int, header, cell string) string {
-		if row < 0 || row >= n {
-			return cell
-		}
-		if !nodes[row].Ready {
-			return v.paint(cell, attrRed)
-		}
-		return cell
-	})
 }
 
 func (v View) footer() []string {
@@ -308,137 +428,13 @@ func (v View) footer() []string {
 	return []string{v.paint(help, attrDim)}
 }
 
-type column struct {
-	header string
-	cells  []string
-	// drop is how soon this column is sacrificed on a narrow terminal.
-	// 0 means keep it until nothing else can go.
-	drop int
-}
-
-func (v View) table(title string, cols []column, color func(row int, header, cell string) string) []string {
-	cols = fitColumns(cols, v.Width)
-	cols = shrinkColumns(cols, v.Width)
-	widths := make([]int, len(cols))
-	rows := 0
-	for i, c := range cols {
-		widths[i] = utf8.RuneCountInString(c.header)
-		if len(c.cells) > rows {
-			rows = len(c.cells)
-		}
-		for _, cell := range c.cells {
-			if n := utf8.RuneCountInString(cell); n > widths[i] {
-				widths[i] = n
-			}
-		}
+func (v View) dot(health string) string {
+	ch := "●"
+	switch health {
+	case HealthMissing, HealthStopped:
+		ch = "○"
 	}
-
-	headers := make([]string, len(cols))
-	for i, c := range cols {
-		headers[i] = c.header
-	}
-
-	var out []string
-	out = append(out, v.paint(title, attrBold))
-	out = append(out, "  "+v.paint(joinCells(headers, widths, true), attrDim))
-	for r := 0; r < rows; r++ {
-		cells := make([]string, len(cols))
-		for i, c := range cols {
-			cell := ""
-			if r < len(c.cells) {
-				cell = c.cells[r]
-			}
-			padded := padCell(cell, widths[i])
-			if color != nil {
-				padded = color(r, c.header, padded)
-			}
-			cells[i] = padded
-		}
-		out = append(out, "  "+strings.TrimRight(strings.Join(cells, "  "), " "))
-	}
-	return out
-}
-
-func fitColumns(cols []column, width int) []column {
-	if width <= 0 {
-		return cols
-	}
-	for {
-		widths := make([]int, len(cols))
-		for i, c := range cols {
-			widths[i] = utf8.RuneCountInString(c.header)
-			for _, cell := range c.cells {
-				if n := utf8.RuneCountInString(cell); n > widths[i] {
-					widths[i] = n
-				}
-			}
-		}
-		if totalWidth(widths)+2 <= width || !dropOneColumn(&cols) {
-			return cols
-		}
-	}
-}
-
-// shrinkColumns trims the widest remaining column when dropping columns
-// still leaves the table wider than the terminal. Pod names and dirty
-// release ids are the usual offenders.
-func shrinkColumns(cols []column, width int) []column {
-	if width <= 0 || len(cols) == 0 {
-		return cols
-	}
-	for {
-		widths := columnWidths(cols)
-		extra := totalWidth(widths) - width
-		if extra <= 0 {
-			return cols
-		}
-		widest := 0
-		for i, w := range widths {
-			if w > widths[widest] {
-				widest = i
-			}
-		}
-		target := widths[widest] - extra
-		if target < 4 {
-			target = 4
-		}
-		if target >= widths[widest] {
-			return cols
-		}
-		cols[widest].header = truncateRunes(cols[widest].header, target)
-		for i, cell := range cols[widest].cells {
-			cols[widest].cells[i] = truncateRunes(cell, target)
-		}
-	}
-}
-
-func columnWidths(cols []column) []int {
-	widths := make([]int, len(cols))
-	for i, c := range cols {
-		widths[i] = utf8.RuneCountInString(c.header)
-		for _, cell := range c.cells {
-			if n := utf8.RuneCountInString(cell); n > widths[i] {
-				widths[i] = n
-			}
-		}
-	}
-	return widths
-}
-
-func dropOneColumn(cols *[]column) bool {
-	best := -1
-	bestPri := 0
-	for i, c := range *cols {
-		if c.drop > bestPri {
-			bestPri = c.drop
-			best = i
-		}
-	}
-	if best < 0 {
-		return false
-	}
-	*cols = append((*cols)[:best], (*cols)[best+1:]...)
-	return true
+	return v.paint(ch, healthAttr(health))
 }
 
 func (v View) paint(s string, attrs ...string) string {
@@ -463,38 +459,12 @@ func healthAttr(h string) string {
 	}
 }
 
-func joinCells(cells []string, widths []int, upper bool) string {
-	parts := make([]string, 0, len(cells))
-	for i, c := range cells {
-		if upper {
-			c = strings.ToUpper(c)
-		}
-		w := 0
-		if i < len(widths) {
-			w = widths[i]
-		}
-		parts = append(parts, padCell(c, w))
-	}
-	return strings.TrimRight(strings.Join(parts, "  "), " ")
-}
-
 func padCell(s string, w int) string {
 	n := utf8.RuneCountInString(s)
 	if n >= w {
 		return s
 	}
 	return s + strings.Repeat(" ", w-n)
-}
-
-func totalWidth(widths []int) int {
-	n := 2
-	for i, w := range widths {
-		n += w
-		if i < len(widths)-1 {
-			n += 2
-		}
-	}
-	return n
 }
 
 func fitRow(left, right string, width int, color bool) string {
@@ -505,7 +475,6 @@ func fitRow(left, right string, width int, color bool) string {
 	}
 	gap := width - utf8.RuneCountInString(plainLeft) - utf8.RuneCountInString(plainRight)
 	if gap < 2 {
-		// Prefer the identity line; the timestamp can wrap on a tiny terminal.
 		if !color {
 			return truncateRunes(plainLeft, width)
 		}
@@ -582,4 +551,14 @@ func oneLine(s string) string {
 		return s[:157] + "..."
 	}
 	return s
+}
+
+func trimLines(lines []string, n int) []string {
+	if n <= 0 || len(lines) <= n {
+		if n <= 0 {
+			return nil
+		}
+		return lines
+	}
+	return lines[:n]
 }

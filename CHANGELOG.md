@@ -11,6 +11,14 @@ do about them.
 
 ## [Unreleased]
 
+### Changed
+
+- `buidl watch` is a boxed dashboard instead of stacked tables. Stack
+  and cluster cards show CPU/RAM sparklines and node gauges. The
+  selected app expands to its instances. History is the last two
+  minutes of samples, so the graphs fill in while the session is
+  open. `--once` prints the same frame without a growing series.
+
 ## [0.5.1] — 2026-08-17
 
 ### Fixed

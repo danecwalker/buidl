@@ -88,19 +88,19 @@ func TestRenderShowsWhatYouCameToWatch(t *testing.T) {
 		"buidl watch",
 		"web",
 		"production",
-		"APPS",
+		"stack",
 		"postgres",
 		"healthy",
 		"2/2",
 		"45m",
 		"128Mi",
 		"4h",
-		"INSTANCES",
 		"web-aaaa",
-		"CLUSTER",
+		"cluster",
 		"node-1",
 		"500m/2",
 		"q quit",
+		"┌",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q\n%s", want, out)
@@ -132,8 +132,8 @@ func TestRenderAlertsAndDegraded(t *testing.T) {
 	snap.Apps[0].Instances[0].Message = "CrashLoopBackOff"
 	snap.Alerts = []Alert{{Level: "crit", Text: "web is degraded (0/2 ready) — CrashLoopBackOff"}}
 	out := Render(View{Snapshot: snap, Width: 120})
-	if !strings.Contains(out, "ALERTS") {
-		t.Errorf("missing ALERTS:\n%s", out)
+	if !strings.Contains(out, "alerts") {
+		t.Errorf("missing alerts:\n%s", out)
 	}
 	if !strings.Contains(out, "degraded") {
 		t.Errorf("missing degraded:\n%s", out)
@@ -177,6 +177,38 @@ func TestRenderColorPaintsHealth(t *testing.T) {
 	}
 }
 
+func TestRenderLinesStayInsideWidth(t *testing.T) {
+	for _, width := range []int{56, 80, 100, 120} {
+		out := Render(View{Snapshot: sampleSnapshot(), Width: width, Interactive: true, Height: 40})
+		for i, line := range strings.Split(out, "\n") {
+			if n := visibleLen(line); n > width {
+				t.Errorf("width %d line %d is %d: %q", width, i, n, line)
+			}
+		}
+	}
+}
+
+func TestRenderDrawsBoxesAndSparks(t *testing.T) {
+	snap := sampleSnapshot()
+	var hist History
+	for i := 0; i < 16; i++ {
+		s := snap
+		s.Apps[0].Usage.CPUMilli = 20 + int64(i*3)
+		s.Apps[0].Usage.Memory = 64*1024*1024 + int64(i)*1024*1024
+		hist.Record(s)
+	}
+	out := Render(View{Snapshot: snap, History: hist, Width: 100, Interactive: true})
+	if !strings.Contains(out, "┌") || !strings.Contains(out, "┐") {
+		t.Errorf("missing box corners:\n%s", out)
+	}
+	if !strings.ContainsAny(out, "▁▂▃▄▅▆▇█") {
+		t.Errorf("missing sparkline:\n%s", out)
+	}
+	if !strings.Contains(out, "░") && !strings.Contains(out, "█") {
+		t.Errorf("missing cluster gauge:\n%s", out)
+	}
+}
+
 func TestRenderTruncatesLongNamesToTerminalWidth(t *testing.T) {
 	snap := sampleSnapshot()
 	snap.Apps[0].Name = "community-counter"
@@ -191,4 +223,27 @@ func TestRenderTruncatesLongNamesToTerminalWidth(t *testing.T) {
 	if !strings.Contains(out, "…") {
 		t.Errorf("expected a truncated name on a narrow terminal:\n%s", out)
 	}
+}
+
+func TestDumpDashboard(t *testing.T) {
+	if !testing.Verbose() {
+		t.Skip("use -v to print a frame")
+	}
+	snap := sampleSnapshot()
+	snap.Stack = "community-counter"
+	snap.Namespace = "community-counter"
+	snap.Context = "community-counter"
+	snap.Apps[0].Name = "community-counter"
+	snap.Apps[0].Release = "e86ff6a-dirty-tjvak5"
+	snap.Apps[0].Instances[0].Name = "community-counter-e86ff6a-dirty-tjvak5-7d8f9c4b6-xk2n4"
+	var hist History
+	for i := 0; i < 24; i++ {
+		s := snap
+		s.Apps[0].Usage.CPUMilli = 20 + int64(i%9)
+		s.Apps[0].Usage.Memory = 64*1024*1024 + int64(i)*1024*1024
+		s.Apps[1].Usage.CPUMilli = 6 + int64(i%4)
+		s.Nodes[0].Usage.CPUMilli = 400 + int64(i*10)
+		hist.Record(s)
+	}
+	t.Log("\n" + Render(View{Snapshot: snap, History: hist, Selected: 0, Width: 100, Height: 36, Interactive: true, Interval: 2 * time.Second, Now: time.Now()}))
 }

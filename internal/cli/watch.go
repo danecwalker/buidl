@@ -30,13 +30,12 @@ func newWatchCmd(a *App) *cobra.Command {
 		Short: "Live dashboard of health, RAM, CPU, and uptime",
 		Long: `Watch the stack the way you would a status page.
 
-Shows every process and stateful app: health, ready counts, RAM, CPU,
-uptime (how long the oldest ready instance has been running), restarts,
-and the live release. Selecting a row lists its instances. Cluster nodes
-show ready state and capacity.
+A boxed live dashboard: stack and cluster cards, per-app CPU/RAM
+sparklines, gauges, and the selected app's instances. Health, ready
+counts, uptime, restarts, and the live release sit in the same frame.
 
 RAM and CPU come from metrics-server. k3s bundles it unless disabled;
-without it those columns show — and everything else still updates.
+without it those series show — and everything else still updates.
 
 On a terminal this is a live view (q to quit, j/k to select, r to
 refresh). ` + "`--once`" + ` and non-TTY stdout print one snapshot and exit.`,
