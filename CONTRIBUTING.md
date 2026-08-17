@@ -3,9 +3,10 @@
 ## Getting set up
 
 ```sh
-make test        # unit tests — no cluster, no network
-make lint
-make build
+task test        # unit tests — no cluster, no network
+task lint
+task build
+task docs-serve  # Hugo docs at site/, http://localhost:1313/buidl/
 ```
 
 ## What the tests are for
@@ -22,7 +23,7 @@ to the Deployment controller. Every one of those passed the unit suite cleanly.
 
 ```sh
 export DEMO_SECRET=any-value-for-testing
-make acceptance
+task acceptance
 ```
 
 `examples/hello` is an app built to misbehave on demand — `FAIL_READINESS=1`,

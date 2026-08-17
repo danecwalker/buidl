@@ -1,0 +1,113 @@
+version: '3'
+
+vars:
+  BINARY: buidl
+  PKG: github.com/danecwalker/buidl/cmd/buidl
+  # Prefer a tag; fall back to a short sha so a dev build is still identifiable.
+  # `task release VERSION=v0.6.0` and `VERSION=v0.6.0 task release` both win.
+  VERSION:
+    sh: |
+      if [ -n "${VERSION:-}" ]; then
+        printf '%s\n' "$VERSION"
+      else
+        git describe --tags --always --dirty 2>/dev/null || echo dev
+      fi
+  LDFLAGS: -s -w -X main.version={{.VERSION}}
+
+tasks:
+  default:
+    desc: Build ./bin/buidl
+    cmds:
+      - task: build
+
+  build:
+    desc: Build ./bin/buidl
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o bin/{{.BINARY}} {{.PKG}}
+
+  install:
+    desc: Install $GOPATH/bin/buidl, version stamped from git describe
+    cmds:
+      - go install -trimpath -ldflags "{{.LDFLAGS}}" {{.PKG}}
+
+  test:
+    desc: Unit tests. No cluster, no network.
+    cmds:
+      - go test ./...
+
+  test-race:
+    desc: Unit tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  # Real cluster and registry. Covers what unit tests cannot: BuildKit talking
+  # to a registry, server-side apply, rollout gating, and the failure diagnostics.
+  #
+  #   export DEMO_SECRET=any-value
+  #   task acceptance
+  acceptance:
+    desc: Acceptance tests against a real cluster and registry
+    deps: [build]
+    cmds:
+      - ./test/acceptance/run.sh
+
+  cover:
+    desc: Unit-test coverage summary
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out | tail -1
+
+  lint:
+    desc: go vet and gofmt check
+    cmds:
+      - go vet ./...
+      - gofmt -l -d .
+
+  tidy:
+    desc: go mod tidy
+    cmds:
+      - go mod tidy
+
+  # Cross-compile the binaries published to releases. CGO is off so each is a
+  # single static file with no runtime dependencies.
+  #
+  # macOS ships `shasum`, Linux ships `sha256sum`. Both emit and verify the same
+  # format, so checksums.txt is checkable with whichever the user happens to have.
+  # Hashed from inside dist/ so the file holds bare names, which is what
+  # `sha256sum -c` needs when a user downloads next to the binary.
+  release:
+    desc: Cross-compile linux/darwin amd64/arm64 into dist/
+    cmds:
+      - rm -rf dist
+      - mkdir -p dist
+      - |
+        for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+          os=${platform%/*}
+          arch=${platform#*/}
+          echo "building dist/{{.BINARY}}-$os-$arch"
+          CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
+            go build -trimpath -ldflags "{{.LDFLAGS}}" -o dist/{{.BINARY}}-$os-$arch {{.PKG}}
+        done
+      - |
+        cd dist
+        if command -v sha256sum >/dev/null 2>&1; then
+          sha256sum {{.BINARY}}-* > checksums.txt
+        else
+          shasum -a 256 {{.BINARY}}-* > checksums.txt
+        fi
+        echo "wrote dist/checksums.txt"
+
+  docs:
+    desc: Build the Hugo docs site into site/public
+    cmds:
+      - hugo --gc --minify --source site
+
+  docs-serve:
+    desc: Serve docs at http://localhost:1313/buidl/
+    cmds:
+      - hugo server --source site --disableFastRender
+
+  clean:
+    desc: Remove build and docs output
+    cmds:
+      - rm -rf bin dist coverage.out site/public site/resources .hugo_build.lock site/.hugo_build.lock

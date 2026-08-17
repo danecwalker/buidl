@@ -29,19 +29,22 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@v3.48.0
+
       # A tag can be pushed from a branch whose tests never ran. Re-running them
       # here is cheap next to shipping a broken binary under a permanent tag.
       - name: Test
         run: go test ./...
 
-      # `make release` is the same target used locally and in ci.yml's
+      # `task release` is the same task used locally and in ci.yml's
       # build-matrix, so a release is not built by a recipe that only exists in
       # this file and is therefore only exercised at tag time. It sets
       # CGO_ENABLED=0 (static, no glibc floor) and -trimpath (no build-host
       # paths baked into the binary, so the same source builds byte-identically
       # from any checkout directory).
       - name: Cross-compile and checksum
-        run: make release VERSION=${{ github.ref_name }}
+        run: task release VERSION=${{ github.ref_name }}
 
       # The tag is the only thing users can see; the version string is the only
       # thing the binary can report. If they disagree, `buidl --version` lies

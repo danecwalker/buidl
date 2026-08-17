@@ -1,0 +1,68 @@
+{{ define "main" }}
+<article class="home">
+  <header class="home-lead">
+    <p class="kicker">one stack · one CLI · your machines</p>
+    <h1>Build without a daemon. Deploy a digest.</h1>
+    <p class="lede">{{ .Site.Params.description }}</p>
+  </header>
+
+  <section class="home-path" aria-labelledby="path-heading">
+    <div class="path-head">
+      <h2 id="path-heading">Happy path</h2>
+      <p>The commands write <code>buidl.yaml</code>. You should not need to edit it.</p>
+    </div>
+    <pre class="path-block" tabindex="0"><code>buidl init
+buidl add server 203.0.113.10
+buidl add domain example.com
+buidl deploy</code></pre>
+  </section>
+
+  <div class="home-split">
+    <section>
+      <h2>What it does</h2>
+      <ul class="plain">
+        <li>BuildKit builds the image. No local Docker daemon.</li>
+        <li>Omit <code>--registry</code> and <code>deploy</code> copies the archive onto your servers.</li>
+        <li>The running pods pin that digest. A restart cannot pick up different bytes.</li>
+        <li><code>deploy</code> can install k3s or RKE2 on machines you already have.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>What it does not</h2>
+      <ul class="plain">
+        <li>It does not create VMs, networks, or load balancers.</li>
+        <li>It does not imply production when <code>-e</code> is omitted and overlays exist.</li>
+        <li>It does not update an existing Postgres or Redis unless you name it.</li>
+        <li>It does not guess a health path when probes fail.</li>
+      </ul>
+    </section>
+  </div>
+
+  <nav class="home-next" aria-label="Next">
+    <a href="{{ relref . "install" }}">
+      <span class="next-name">Install</span>
+      <span class="next-desc">curl the installer, or go install</span>
+    </a>
+    <a href="{{ relref . "quickstart" }}">
+      <span class="next-name">Quick start</span>
+      <span class="next-desc">init, add, deploy</span>
+    </a>
+    <a href="{{ relref . "no-registry" }}">
+      <span class="next-name">No registry</span>
+      <span class="next-desc">sideload onto the nodes</span>
+    </a>
+    <a href="{{ relref . "watch" }}">
+      <span class="next-name">Watch</span>
+      <span class="next-desc">live dashboard of the stack</span>
+    </a>
+    <a href="{{ relref . "commands" }}">
+      <span class="next-name">Commands</span>
+      <span class="next-desc">the front door, then the hidden ones</span>
+    </a>
+    <a href="{{ relref . "config" }}">
+      <span class="next-name">Config</span>
+      <span class="next-desc">buidl.yaml when you need it</span>
+    </a>
+  </nav>
+</article>
+{{ end }}

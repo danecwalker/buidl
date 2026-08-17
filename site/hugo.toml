@@ -1,0 +1,121 @@
+baseURL = 'https://danecwalker.github.io/buidl/'
+languageCode = 'en-us'
+title = 'buidl'
+enableRobotsTXT = true
+enableGitInfo = true
+disableKinds = ['taxonomy', 'term', 'RSS', 'section']
+summaryLength = 24
+
+[params]
+  description = 'Build container images without a Docker daemon and deploy them to Kubernetes as immutable, digest-pinned releases.'
+  github = 'https://github.com/danecwalker/buidl'
+  install = 'https://raw.githubusercontent.com/danecwalker/buidl/main/install.sh'
+
+[markup.goldmark.renderer]
+  unsafe = false
+
+[markup.highlight]
+  noClasses = false
+  style = 'native'
+  tabWidth = 2
+  lineNos = false
+
+[markup.tableOfContents]
+  startLevel = 2
+  endLevel = 3
+  ordered = false
+
+# Start
+[[menus.docs]]
+  name = 'Install'
+  pageRef = '/install'
+  weight = 10
+  [menus.docs.params]
+    group = 'Start'
+
+[[menus.docs]]
+  name = 'Quick start'
+  pageRef = '/quickstart'
+  weight = 20
+  [menus.docs.params]
+    group = 'Start'
+
+# Operate
+[[menus.docs]]
+  name = 'Commands'
+  pageRef = '/commands'
+  weight = 30
+  [menus.docs.params]
+    group = 'Operate'
+
+[[menus.docs]]
+  name = 'Watch'
+  pageRef = '/watch'
+  weight = 40
+  [menus.docs.params]
+    group = 'Operate'
+
+# Guides
+[[menus.docs]]
+  name = 'No registry'
+  pageRef = '/no-registry'
+  weight = 50
+  [menus.docs.params]
+    group = 'Guides'
+
+[[menus.docs]]
+  name = 'Stack'
+  pageRef = '/stack'
+  weight = 60
+  [menus.docs.params]
+    group = 'Guides'
+
+[[menus.docs]]
+  name = 'Environments'
+  pageRef = '/environments'
+  weight = 70
+  [menus.docs.params]
+    group = 'Guides'
+
+[[menus.docs]]
+  name = 'Secrets'
+  pageRef = '/secrets'
+  weight = 80
+  [menus.docs.params]
+    group = 'Guides'
+
+[[menus.docs]]
+  name = 'Clusters'
+  pageRef = '/clusters'
+  weight = 90
+  [menus.docs.params]
+    group = 'Guides'
+
+[[menus.docs]]
+  name = 'CI'
+  pageRef = '/ci'
+  weight = 100
+  [menus.docs.params]
+    group = 'Guides'
+
+# Reference
+[[menus.docs]]
+  name = 'Config'
+  pageRef = '/config'
+  weight = 110
+  [menus.docs.params]
+    group = 'Reference'
+
+[[menus.docs]]
+  name = 'Health checks'
+  pageRef = '/health'
+  weight = 120
+  [menus.docs.params]
+    group = 'Reference'
+
+[[menus.docs]]
+  name = 'Hooks'
+  pageRef = '/hooks'
+  weight = 130
+  [menus.docs.params]
+    group = 'Reference'

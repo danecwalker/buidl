@@ -2,6 +2,8 @@
 
 Build container images without a Docker daemon and deploy them to Kubernetes as immutable, digest-pinned releases.
 
+Docs: https://danecwalker.github.io/buidl/
+
 ```
 buidl init
 buidl add server 203.0.113.10 --email you@example.com
@@ -29,18 +31,18 @@ With Go 1.25+:
 go install github.com/danecwalker/buidl/cmd/buidl@latest
 ```
 
-`go install` does not stamp the version, so the binary reports `dev`. Use the installer or `make install` if you need `buidl --version` to match a tag. `buidl update` will replace a `dev` binary with the latest release.
+`go install` does not stamp the version, so the binary reports `dev`. Use the installer or `task install` if you need `buidl --version` to match a tag. `buidl update` will replace a `dev` binary with the latest release.
 
 From source:
 
 ```sh
 git clone https://github.com/danecwalker/buidl.git
 cd buidl
-make build      # ./bin/buidl
-make install    # $GOPATH/bin/buidl, version stamped from git describe
+task build      # ./bin/buidl
+task install    # $GOPATH/bin/buidl, version stamped from git describe
 ```
 
-`buidl --version` reports the release tag on published binaries and the git describe string on a `make install` build.
+`buidl --version` reports the release tag on published binaries and the git describe string on a `task install` build.
 
 ## Quick start
 
@@ -530,15 +532,15 @@ Not implemented: inventory providers other than `static`, and `deploy.target` va
 ## Development
 
 ```sh
-make test        # unit tests. No cluster, no network.
-make lint
-make build
-make acceptance  # real cluster and registry
+task test        # unit tests. No cluster, no network.
+task lint
+task build
+task acceptance  # real cluster and registry
 ```
 
 ```sh
 export DEMO_SECRET=any-value-for-testing
-make acceptance
+task acceptance
 KEEP=1 ./test/acceptance/run.sh healthy
 ```
 

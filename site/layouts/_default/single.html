@@ -1,0 +1,17 @@
+{{ define "main" }}
+<article class="doc">
+  <header class="doc-head">
+    {{ with .Params.group }}<p class="kicker">{{ . }}</p>{{ end }}
+    <h1>{{ .Title }}</h1>
+    {{ with .Description }}<p class="lede">{{ . }}</p>{{ end }}
+  </header>
+  {{ if gt (len .TableOfContents) 32 }}
+    <nav class="toc" aria-label="On this page">
+      {{ .TableOfContents }}
+    </nav>
+  {{ end }}
+  <div class="prose">
+    {{ .Content }}
+  </div>
+</article>
+{{ end }}

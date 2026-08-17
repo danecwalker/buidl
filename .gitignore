@@ -2,6 +2,10 @@
 bin/
 dist/
 coverage.out
+site/public/
+site/resources/
+.hugo_build.lock
+site/.hugo_build.lock
 
 # Secret VALUES only. `.buidl/secrets-common` is deliberately NOT ignored: it
 # holds indirections ($VAR references) rather than values, and committing it is
