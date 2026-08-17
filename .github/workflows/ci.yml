@@ -21,6 +21,10 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      # Same Taskfile as a laptop. Pinned so a Task major cannot change CI.
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@v3.48.0
+
       - name: Verify formatting
         run: |
           unformatted="$(gofmt -l .)"
@@ -54,7 +58,7 @@ jobs:
           go tool cover -func=coverage.out | tail -1
 
       - name: Build
-        run: make build
+        run: task build
 
       # The binary must actually run. A build succeeding says nothing about
       # whether the command tree is wired up.
@@ -86,7 +90,9 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
+      - name: Install Task
+        run: go install github.com/go-task/task/v3/cmd/task@v3.48.0
       - name: Cross-compile every released platform
-        run: make release
+        run: task release
       - name: Show artifacts
         run: ls -lh dist/

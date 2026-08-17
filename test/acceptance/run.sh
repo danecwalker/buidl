@@ -82,7 +82,7 @@ preflight() {
 
   if [[ ! -x "$BUIDL" ]]; then
     red "buidl binary not found at $BUIDL"
-    red "build it first:  make build"
+    red "build it first:  task build"
     missing=1
   fi
 

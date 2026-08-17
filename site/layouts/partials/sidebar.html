@@ -1,0 +1,18 @@
+{{ $current := . }}
+<aside class="side" aria-label="Docs">
+  {{ $groups := slice "Start" "Operate" "Guides" "Reference" }}
+  {{ range $groups }}
+    {{ $group := . }}
+    {{ $items := where site.Menus.docs "Params.group" $group }}
+    {{ if $items }}
+      <p class="side-label">{{ $group }}</p>
+      <ul class="side-list">
+        {{ range $items }}
+          <li>
+            <a href="{{ .URL }}"{{ if or ($current.IsMenuCurrent "docs" .) ($current.HasMenuCurrent "docs" .) }} aria-current="page"{{ end }}>{{ .Name }}</a>
+          </li>
+        {{ end }}
+      </ul>
+    {{ end }}
+  {{ end }}
+</aside>

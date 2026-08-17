@@ -159,7 +159,7 @@ func (c *Client) PlatformAsset() string {
 	return AssetName(c.goos(), c.goarch())
 }
 
-// AssetName is the file published by `make release` for this platform.
+// AssetName is the file published by `task release` for this platform.
 func AssetName(goos, goarch string) string {
 	osName := strings.ToLower(goos)
 	arch := strings.ToLower(goarch)
@@ -172,7 +172,7 @@ func AssetName(goos, goarch string) string {
 	return "buidl-" + osName + "-" + arch
 }
 
-// ParseChecksums reads the `sha256sum` / `shasum -a 256` file `make release`
+// ParseChecksums reads the `sha256sum` / `shasum -a 256` file `task release`
 // writes: bare filenames, two spaces (or " *") before the name.
 func ParseChecksums(r io.Reader) (map[string]string, error) {
 	data, err := io.ReadAll(r)

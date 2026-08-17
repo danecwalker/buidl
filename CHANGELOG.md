@@ -11,6 +11,13 @@ do about them.
 
 ## [Unreleased]
 
+### Added
+
+- Public docs site (Hugo) at https://danecwalker.github.io/buidl/. Source
+  is `site/`. Preview with `task docs-serve`.
+- Development tasks live in `Taskfile.yml` (`task build`, `task test`,
+  `task release`). The Makefile is gone.
+
 ## [0.6.0] — 2026-08-17
 
 ### Changed
