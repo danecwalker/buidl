@@ -11,6 +11,15 @@ do about them.
 
 ## [Unreleased]
 
+### Added
+
+- Public docs site (Hugo) at https://danecwalker.github.io/buidl/. Source
+  is `site/`. Preview with `task docs-serve`.
+- Development tasks live in `Taskfile.yml` (`task build`, `task test`,
+  `task release`). The Makefile is gone.
+
+## [0.6.1] — 2026-08-19
+
 ### Fixed
 
 - Blue-green deploys no longer flip the Service selector until the new
@@ -18,13 +27,6 @@ do about them.
   Endpoints and dropped traffic for the whole rollout. Cutover now waits
   for a ready endpoint before scaling the old release down, and restores
   the previous selector if that wait fails.
-
-### Added
-
-- Public docs site (Hugo) at https://danecwalker.github.io/buidl/. Source
-  is `site/`. Preview with `task docs-serve`.
-- Development tasks live in `Taskfile.yml` (`task build`, `task test`,
-  `task release`). The Makefile is gone.
 
 ## [0.6.0] — 2026-08-17
 
@@ -351,7 +353,8 @@ First tagged release.
   control plane at a time. It does **not** cordon and drain first, so pods are
   restarted rather than gracefully evicted.
 
-[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/danecwalker/buidl/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/danecwalker/buidl/releases/tag/v0.6.1
 [0.6.0]: https://github.com/danecwalker/buidl/releases/tag/v0.6.0
 [0.5.1]: https://github.com/danecwalker/buidl/releases/tag/v0.5.1
 [0.5.0]: https://github.com/danecwalker/buidl/releases/tag/v0.5.0
