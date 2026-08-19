@@ -11,6 +11,14 @@ do about them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Blue-green deploys no longer flip the Service selector until the new
+  release is healthy. Applying it with the rest of the objects emptied
+  Endpoints and dropped traffic for the whole rollout. Cutover now waits
+  for a ready endpoint before scaling the old release down, and restores
+  the previous selector if that wait fails.
+
 ### Added
 
 - Public docs site (Hugo) at https://danecwalker.github.io/buidl/. Source

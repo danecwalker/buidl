@@ -180,7 +180,7 @@ func (t *Target) Deploy(ctx context.Context, req deploy.Request) (*deploy.Outcom
 	}
 
 	t.log.Step("Applying manifests")
-	changes, err := t.applyAll(ctx, objs, replicas(req.Config))
+	changes, err := t.applyAll(ctx, t.objectsToApply(ctx, req, objs), replicas(req.Config))
 	if err != nil {
 		// Return the partial outcome with the error so the caller can report which
 		// objects landed before the failure.
@@ -212,6 +212,9 @@ func (t *Target) Deploy(ctx context.Context, req deploy.Request) (*deploy.Outcom
 	t.log.StepDetail("%d changed, %d unchanged", applied, unchanged)
 
 	if !req.Wait {
+		if req.Config.Deploy.Strategy.Type == config.StrategyBlueGreen && previous != "" {
+			t.log.Warn("not waiting for health checks; traffic still served by %s", previous)
+		}
 		outcome.Duration = time.Since(start)
 		return outcome, nil
 	}
@@ -222,6 +225,16 @@ func (t *Target) Deploy(ctx context.Context, req deploy.Request) (*deploy.Outcom
 	t.log.Step("Waiting for health checks")
 	if err := t.waitForRollout(ctx, name, req.Release, timeout); err != nil {
 		t.reportRolloutFailure(err)
+
+		if req.Config.Deploy.Strategy.Type == config.StrategyBlueGreen {
+			// The Service still points at the previous release, so the failed
+			// green never received traffic. Rolling-update rollback looks up a
+			// Deployment named after the app, which blue-green does not create.
+			if previous != "" {
+				t.log.Warn("new release did not become healthy; traffic still served by %s", previous)
+			}
+			return outcome, err
+		}
 
 		if !req.AutoRollback || previous == "" {
 			return outcome, err
@@ -247,7 +260,15 @@ func (t *Target) Deploy(ctx context.Context, req deploy.Request) (*deploy.Outcom
 	// this apply, the Service still pointed at the old release.
 	if req.Config.Deploy.Strategy.Type == config.StrategyBlueGreen {
 		t.log.Step("Switching traffic")
-		if err := t.cutover(ctx, req); err != nil {
+		cutoverChanges, err := t.cutover(ctx, req)
+		outcome.Changes = append(outcome.Changes, cutoverChanges...)
+		if err != nil {
+			if previous != "" {
+				if rbErr := t.revertCutover(ctx, req.Config, previous); rbErr != nil {
+					return outcome, fmt.Errorf("%w\n\ncould not restore traffic to %s: %v", err, previous, rbErr)
+				}
+				t.log.Warn("restored traffic to %s", previous)
+			}
 			return outcome, err
 		}
 		if err := t.reapOldBlueGreen(ctx, req); err != nil {
@@ -277,14 +298,103 @@ func (t *Target) Deploy(ctx context.Context, req deploy.Request) (*deploy.Outcom
 	return outcome, nil
 }
 
-// cutover re-applies the Service so its selector points at the new release.
-func (t *Target) cutover(ctx context.Context, req deploy.Request) error {
+// objectsToApply is the subset of rendered objects that may be written before
+// the new release is healthy.
+//
+// For a live blue-green Service the selector is the cutover. Applying it with
+// the rest of the objects points traffic at pods that do not exist yet and
+// drops every in-flight request until the new release passes health checks.
+func (t *Target) objectsToApply(ctx context.Context, req deploy.Request, objs []Object) []Object {
+	if req.Config.Deploy.Strategy.Type != config.StrategyBlueGreen {
+		return objs
+	}
+	if !t.serviceExists(ctx, req.Config) {
+		return objs
+	}
+	return omitKind(objs, "Service")
+}
+
+func omitKind(objs []Object, kind string) []Object {
+	out := make([]Object, 0, len(objs))
+	for _, obj := range objs {
+		if obj.Kind == kind {
+			continue
+		}
+		out = append(out, obj)
+	}
+	return out
+}
+
+func (t *Target) serviceExists(ctx context.Context, cfg *config.Config) bool {
+	if t.clientset == nil {
+		return false
+	}
+	_, err := t.clientset.CoreV1().Services(t.Namespace).Get(ctx, release.ObjectName(cfg.App), metav1.GetOptions{})
+	return err == nil
+}
+
+// cutover re-applies the Service so its selector points at the new release,
+// then waits until kube-proxy has at least one ready endpoint so we do not
+// scale the old release to zero against an empty address set.
+func (t *Target) cutover(ctx context.Context, req deploy.Request) ([]deploy.Change, error) {
 	svc := t.service(req.Config, req.Release)
-	if _, err := t.apply(ctx, svc, false); err != nil {
-		return fmt.Errorf("switching traffic to %s: %w", req.Release.ID, err)
+	changes, err := t.applyAll(ctx, []Object{svc}, replicas(req.Config))
+	if err != nil {
+		return changes, fmt.Errorf("switching traffic to %s: %w", req.Release.ID, err)
+	}
+	if err := t.waitForReadyEndpoints(ctx, svc.Name, req.Config.Deploy.DrainTimeout.Or(defaultDrain)); err != nil {
+		return changes, fmt.Errorf("switching traffic to %s: %w", req.Release.ID, err)
 	}
 	t.log.Success("traffic now served by %s", req.Release.ID)
-	return nil
+	return changes, nil
+}
+
+func (t *Target) revertCutover(ctx context.Context, cfg *config.Config, previous string) error {
+	rel := release.Release{ID: previous, Environment: cfg.Environment}
+	svc := t.service(cfg, rel)
+	if _, err := t.apply(ctx, svc, false); err != nil {
+		return err
+	}
+	return t.waitForReadyEndpoints(ctx, svc.Name, cfg.Deploy.DrainTimeout.Or(defaultDrain))
+}
+
+func (t *Target) waitForReadyEndpoints(ctx context.Context, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		n, err := t.readyEndpointCount(ctx, name)
+		if err == nil && n > 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("service %s has no ready endpoints", name)
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (t *Target) readyEndpointCount(ctx context.Context, name string) (int, error) {
+	ep, err := t.clientset.CoreV1().Endpoints(t.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return 0, err
+	}
+	return readyEndpointAddresses(ep), nil
+}
+
+func readyEndpointAddresses(ep *corev1.Endpoints) int {
+	n := 0
+	for _, s := range ep.Subsets {
+		n += len(s.Addresses)
+	}
+	return n
 }
 
 // reapOldBlueGreen deletes superseded per-release Deployments beyond the

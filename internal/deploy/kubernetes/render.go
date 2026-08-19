@@ -100,6 +100,10 @@ func (t *Target) Render(req deploy.Request) ([]Object, error) {
 	}
 	objs = append(objs, *dep)
 
+	// Always rendered so `plan` can show the selector flip. Deploy must not
+	// apply a live Service until the new release is healthy: the selector is
+	// the cutover, and applying it here would empty Endpoints until the new
+	// pods exist.
 	objs = append(objs, t.service(cfg, rel))
 
 	if cfg.Deploy.Autoscale != nil {
